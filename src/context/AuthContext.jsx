@@ -1,55 +1,100 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { LOGIN_CREDENTIALS, MOCK_USER } from "../data/mockData";
+import { api } from "../services/api";
 
 const AuthContext = createContext(null);
 
+const STORAGE_KEY = "ssk_client_auth";
+
+const loadStoredSession = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
 export function AuthProvider({ children }) {
-  const navigate = useNavigate();
-  const [auth, setAuth] = useState(() => {
+  const [session, setSession] = useState(loadStoredSession);
+
+  const isAuthenticated = !!(session?.user);
+
+  const persistSession = useCallback((user, tokens) => {
+    const data = { user, tokens };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    setSession(data);
+  }, []);
+
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    setSession(null);
+  }, []);
+
+  const login = useCallback(async (phone, password) => {
+    const data = await api.post("/api/auth/login", { phone, password });
+    if (!data.success) throw new Error(data.message || "Login failed");
+    if (data.data.user.role !== "client") throw new Error("Not a client account. Please use the correct portal.");
+    persistSession(data.data.user, data.data.tokens);
+    return data.data.user;
+  }, [persistSession]);
+
+  const register = useCallback(async ({ name, phone, password }) => {
+    const data = await api.post("/api/auth/register", { name, phone, password, role: "client" });
+    if (!data.success) throw new Error(data.message || "Registration failed");
+    return data.data;
+  }, []);
+
+  const sendOtp = useCallback(async (phone) => {
+    const data = await api.post("/api/auth/otp/send", { phone, purpose: "phone_verify" });
+    if (!data.success) throw new Error(data.message || "Failed to send OTP");
+    return data.data;
+  }, []);
+
+  const verifyOtp = useCallback(async (phone, otp) => {
+    const data = await api.post("/api/auth/otp/verify", { phone, otp, purpose: "phone_verify" });
+    if (!data.success) throw new Error(data.message || "Invalid or expired OTP");
+    return data.data;
+  }, []);
+
+  const logout = useCallback(async () => {
     try {
-      const stored = localStorage.getItem("ssk_client_auth");
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+      if (session?.tokens) {
+        await api.post("/api/auth/logout", { refresh_token: session.tokens.refresh_token }, session.tokens.access_token);
+      }
+    } catch {}
+    clearSession();
+  }, [session, clearSession]);
 
-  const isAuthenticated = !!auth;
+  const refreshTokens = useCallback(async () => {
+    if (!session?.tokens?.refresh_token) return false;
+    try {
+      const data = await api.post("/api/auth/refresh-token", { refresh_token: session.tokens.refresh_token });
+      if (data.success) {
+        persistSession(session.user, data.data.tokens);
+        return true;
+      }
+    } catch {}
+    clearSession();
+    return false;
+  }, [session, persistSession, clearSession]);
 
-  const login = useCallback(
-    (email, password) => {
-      return new Promise((resolve, reject) => {
-        setTimeout(() => {
-          if ((email === LOGIN_CREDENTIALS.email && password === LOGIN_CREDENTIALS.password) || !email || !password) {
-            // Accept either correct credentials or even if they are empty (for demo purposes)
-            const useEmail = email || LOGIN_CREDENTIALS.email;
-            const authData = { email: useEmail, phone: LOGIN_CREDENTIALS.phone, name: MOCK_USER.name, token: "mock-jwt-token" };
-            localStorage.setItem("ssk_client_auth", JSON.stringify(authData));
-            setAuth(authData);
-            resolve(authData);
-          } else {
-            reject(new Error("Invalid credentials"));
-          }
-        }, 800);
-      });
-    },
-    []
-  );
+  const forgotPassword = useCallback(async (phone) => {
+    const data = await api.post("/api/auth/forgot-password", { phone });
+    if (!data.success) throw new Error(data.message || "Phone number not found");
+    return data.data;
+  }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("ssk_client_auth");
-    setAuth(null);
-    navigate("/login");
-  }, [navigate]);
+  const resetPassword = useCallback(async (phone, otp, new_password) => {
+    const data = await api.post("/api/auth/reset-password", { phone, otp, new_password });
+    if (!data.success) throw new Error(data.message || "Reset failed");
+    return data.data;
+  }, []);
 
   useEffect(() => {
-    // Handle storage events for multi-tab sync
     const handleStorage = (e) => {
-      if (e.key === "ssk_client_auth") {
-        if (!e.newValue) {
-          setAuth(null);
-        }
+      if (e.key === STORAGE_KEY) {
+        setSession(e.newValue ? JSON.parse(e.newValue) : null);
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -57,7 +102,22 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ auth, isAuthenticated, login, logout, user: MOCK_USER }}>
+    <AuthContext.Provider
+      value={{
+        auth: session,
+        user: session?.user || null,
+        tokens: session?.tokens || null,
+        isAuthenticated,
+        login,
+        register,
+        sendOtp,
+        verifyOtp,
+        logout,
+        refreshTokens,
+        forgotPassword,
+        resetPassword,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -40,6 +40,10 @@ export default function Profile() {
   const toast = useToast();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
+  const initials = user?.name
+    ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+    : 'RK';
+
   const totalBookings = BOOKINGS.length;
   const totalSpent = BOOKINGS.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0);
   const delivered = BOOKINGS.filter((b) => b.status === "Delivered").length;
@@ -73,7 +77,7 @@ export default function Profile() {
             <div className="relative z-10 p-6 text-center">
               {/* Avatar */}
               <div className="w-20 h-20 rounded-full bg-primary/25 border-[3px] border-primary/40 flex items-center justify-center shadow-glow-blue mx-auto mb-4">
-                <span className="font-poppins font-bold text-2xl text-white">{user?.initials || "RK"}</span>
+                <span className="font-poppins font-bold text-2xl text-white">{initials}</span>
               </div>
 
               <h2 className="font-poppins font-semibold text-xl text-white mb-1">

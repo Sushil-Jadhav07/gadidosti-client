@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Truck, Mail, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { Truck, Phone, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { LOGIN_CREDENTIALS } from "../data/mockData";
 
 const FEATURES = [
   { icon: Truck, label: "Book Instantly", desc: "Reserve trucks in under 2 minutes" },
@@ -16,31 +15,31 @@ export default function Login() {
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
   const toast = useToast();
-  const [email, setEmail] = useState(LOGIN_CREDENTIALS.email);
-  const [password, setPassword] = useState(LOGIN_CREDENTIALS.password);
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
-  const emailInputRef = useRef(null);
+  const phoneInputRef = useRef(null);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate("/", { replace: true });
-    }
-    emailInputRef.current?.focus();
+    if (isAuthenticated) navigate("/", { replace: true });
+    phoneInputRef.current?.focus();
   }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
     try {
-      await login(email, password);
-      toast.success("Welcome back, Rajesh!", "Login Successful");
+      const user = await login(phone, password);
+      toast.success(`Welcome back, ${user.name}!`, "Login Successful");
       navigate("/");
     } catch (err) {
+      setError(err.message || "Invalid credentials. Please try again.");
       setShake(true);
       setTimeout(() => setShake(false), 500);
-      toast.error("Invalid credentials. Please try again.", "Login Failed");
     } finally {
       setLoading(false);
     }
@@ -50,15 +49,10 @@ export default function Login() {
     <div className="min-h-screen flex">
       {/* Left — Branding Panel */}
       <div className="hidden lg:flex flex-col w-[55%] bg-secondary relative overflow-hidden">
-        {/* Background glow */}
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              "radial-gradient(ellipse at 30% 40%, rgba(25,118,255,0.25) 0%, transparent 60%)",
-          }}
+          style={{ background: "radial-gradient(ellipse at 30% 40%, rgba(25,118,255,0.25) 0%, transparent 60%)" }}
         />
-        {/* Dot pattern */}
         <div className="absolute inset-0 opacity-5">
           <svg width="100%" height="100%">
             <defs>
@@ -70,15 +64,12 @@ export default function Login() {
           </svg>
         </div>
 
-        {/* Content */}
         <div className="relative z-10 flex flex-col h-full px-12 py-10">
-          {/* Logo */}
           <div className="flex flex-col items-start gap-2">
             <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-14 w-auto" />
-            <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Dashboard </p>
+            <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Portal</p>
           </div>
 
-          {/* Hero text */}
           <div className="flex-1 flex flex-col justify-center">
             <p className="text-primary text-sm font-semibold tracking-wide uppercase mb-3">
               India's Trusted Transport Platform
@@ -93,7 +84,6 @@ export default function Login() {
               fast, reliable, and affordable shipments.
             </p>
 
-            {/* Features */}
             <div className="mt-10 grid grid-cols-2 gap-4">
               {FEATURES.map(({ icon: Icon, label, desc }) => (
                 <div key={label} className="flex items-start gap-3">
@@ -109,20 +99,16 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Footer */}
-          <p className="text-[11px] text-white/30">
-            © 2024 SSK Logistics. All rights reserved.
-          </p>
+          <p className="text-[11px] text-white/30">© 2024 SSK Logistics. All rights reserved.</p>
         </div>
       </div>
 
       {/* Right — Login Form */}
       <div className="flex-1 flex items-center justify-center bg-neutral px-6 py-10">
         <div className="w-full max-w-sm">
-          {/* Mobile logo (hidden on desktop) */}
           <div className="flex flex-col items-center gap-2 mb-8 lg:hidden">
             <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-12 w-auto" />
-            <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Dashboard </p>
+            <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Portal</p>
           </div>
 
           <div className={shake ? "animate-shake" : ""}>
@@ -132,16 +118,19 @@ export default function Login() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                  Email Address
+                  Phone Number
                 </label>
                 <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                  <Mail className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
+                  <Phone className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
+                  <span className="text-neutral-400 text-sm mr-1 select-none">+91</span>
                   <input
-                    ref={emailInputRef}
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="rajesh@example.com"
+                    ref={phoneInputRef}
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    placeholder="Enter mobile number"
+                    inputMode="numeric"
+                    required
                     className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
                   />
                 </div>
@@ -158,6 +147,7 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
+                    required
                     className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
                   />
                   <button
@@ -169,6 +159,13 @@ export default function Login() {
                   </button>
                 </div>
               </div>
+
+              {error && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  {error}
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -191,11 +188,18 @@ export default function Login() {
 
             <div className="mt-6 p-4 bg-white rounded-xl border border-neutral-100">
               <p className="text-xs text-neutral-400 mb-2 font-medium">Demo credentials</p>
-              <p className="text-xs text-neutral-600 font-mono">Email: rajesh@example.com</p>
-              <p className="text-xs text-neutral-600 font-mono mt-1">Password: Client@123</p>
+              <p className="text-xs text-neutral-600 font-mono">Phone: 9000000002</p>
+              <p className="text-xs text-neutral-600 font-mono mt-1">Password: Admin@123456</p>
             </div>
 
-            <p className="text-[11px] text-neutral-400 mt-6 text-center">
+            <p className="text-sm text-neutral-500 text-center mt-5">
+              New here?{" "}
+              <Link to="/register" className="text-primary font-semibold hover:underline">
+                Create an account
+              </Link>
+            </p>
+
+            <p className="text-[11px] text-neutral-400 mt-4 text-center">
               By signing in, you agree to our{" "}
               <button className="text-primary hover:underline">Terms &amp; Privacy Policy</button>
             </p>

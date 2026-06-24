@@ -6,6 +6,7 @@ import BottomNav from "./components/BottomNav";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
 import Home from "./pages/Home";
 import BookTruck from "./pages/BookTruck";
 import MyBookings from "./pages/MyBookings";
@@ -79,6 +80,14 @@ function AppRoutes() {
         element={
           <PublicRoute>
             <Login />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/register"
+        element={
+          <PublicRoute>
+            <Register />
           </PublicRoute>
         }
       />
