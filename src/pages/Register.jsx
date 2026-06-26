@@ -1,28 +1,28 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Phone, Lock, User, Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { Mail, Phone, Lock, User, Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
 export default function Register() {
   const navigate = useNavigate();
-  const { register, sendOtp, verifyOtp } = useAuth();
+  const { register } = useAuth();
   const toast = useToast();
 
-  const [step, setStep] = useState("form"); // "form" | "otp" | "done"
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [devOtp, setDevOtp] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "", confirm: "" });
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const passwordsMatch = form.password === form.confirm || form.confirm === "";
-  const canSubmit = form.name && form.phone.length === 10 && form.password.length >= 6 &&
+  const canSubmit =
+    form.name.trim().length >= 2 &&
+    form.email.trim().includes("@") &&
+    form.password.length >= 6 &&
     form.password === form.confirm;
 
   const handleSubmit = async (e) => {
@@ -31,10 +31,15 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      await register({ name: form.name, phone: form.phone, password: form.password });
-      const otpResult = await sendOtp(form.phone);
-      if (otpResult?.dev_otp) setDevOtp(otpResult.dev_otp);
-      setStep("otp");
+      await register({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone || undefined,
+        password: form.password,
+      });
+      setDone(true);
+      toast.success("Account created! You can now sign in.", "Welcome");
+      setTimeout(() => navigate("/login"), 2000);
     } catch (err) {
       setError(err.message || "Registration failed. Please try again.");
     } finally {
@@ -42,122 +47,17 @@ export default function Register() {
     }
   };
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    if (otp.length !== 6) { setError("Enter the 6-digit OTP."); return; }
-    setError("");
-    setOtpLoading(true);
-    try {
-      await verifyOtp(form.phone, otp);
-      setStep("done");
-      toast.success("Account verified! You can now sign in.", "Registered");
-      setTimeout(() => navigate("/login"), 2000);
-    } catch (err) {
-      setError(err.message || "Invalid OTP. Please try again.");
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    setError("");
-    try {
-      const result = await sendOtp(form.phone);
-      if (result?.dev_otp) setDevOtp(result.dev_otp);
-      toast.success("OTP resent successfully.");
-    } catch (err) {
-      setError(err.message || "Failed to resend OTP.");
-    }
-  };
-
-  if (step === "done") {
+  if (done) {
     return (
       <div className="min-h-screen bg-neutral flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl shadow-lg p-10 text-center max-w-sm w-full">
           <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-8 h-8 text-emerald-500" />
           </div>
-          <h2 className="font-poppins font-bold text-xl text-neutral-800">Account Verified!</h2>
+          <h2 className="font-poppins font-bold text-xl text-neutral-800">Account Created!</h2>
           <p className="text-neutral-500 text-sm mt-2">Redirecting to sign in...</p>
           <div className="mt-5 flex justify-center">
             <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (step === "otp") {
-    return (
-      <div className="min-h-screen bg-neutral flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
-          <div className="flex flex-col items-center gap-2 mb-8">
-            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-12 w-auto" />
-            <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Portal</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <h2 className="font-poppins font-bold text-2xl text-neutral-800 mb-1">Verify Your Phone</h2>
-            <p className="text-sm text-neutral-400 mb-6">
-              Enter the 6-digit code sent to<br />
-              <span className="font-semibold text-neutral-700">+91 {form.phone}</span>
-            </p>
-
-            {devOtp && (
-              <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                <p className="text-xs font-semibold text-amber-700 mb-1">Dev Mode — OTP</p>
-                <p className="text-2xl font-mono font-bold text-amber-800 tracking-widest">{devOtp}</p>
-              </div>
-            )}
-
-            <form onSubmit={handleVerifyOtp} className="space-y-5">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                  OTP Code
-                </label>
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="• • • • • •"
-                  inputMode="numeric"
-                  maxLength={6}
-                  required
-                  autoFocus
-                  className="w-full bg-white border-2 border-neutral-100 rounded-xl px-4 py-4 text-center text-2xl font-mono tracking-[0.5em] focus:outline-none focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
-                />
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={otpLoading || otp.length !== 6}
-                className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-4 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
-              >
-                {otpLoading ? (
-                  <>
-                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  <>Verify &amp; Activate <ArrowRight className="w-4 h-4" /></>
-                )}
-              </button>
-            </form>
-
-            <button
-              type="button"
-              onClick={handleResendOtp}
-              className="mt-4 w-full text-sm text-neutral-400 hover:text-primary flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Resend OTP
-            </button>
           </div>
         </div>
       </div>
@@ -201,6 +101,7 @@ export default function Register() {
           <p className="text-sm text-neutral-400 mb-8">Sign up to start booking trucks</p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Full Name */}
             <div>
               <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
                 Full Name
@@ -213,14 +114,35 @@ export default function Register() {
                   onChange={set("name")}
                   placeholder="Your full name"
                   required
+                  autoFocus
                   className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
                 />
               </div>
             </div>
 
+            {/* Email */}
             <div>
               <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                Phone Number
+                Email Address <span className="text-danger">*</span>
+              </label>
+              <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <Mail className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={set("email")}
+                  placeholder="you@example.com"
+                  required
+                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                />
+              </div>
+              <p className="text-[11px] text-neutral-400 mt-1">Used to sign in to your account</p>
+            </div>
+
+            {/* Phone (optional) */}
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
+                Phone Number <span className="text-neutral-300 font-normal normal-case">(optional)</span>
               </label>
               <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
                 <Phone className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
@@ -231,12 +153,12 @@ export default function Register() {
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
                   placeholder="10-digit mobile number"
                   inputMode="numeric"
-                  required
                   className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
                 />
               </div>
             </div>
 
+            {/* Password */}
             <div>
               <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
                 Password
@@ -258,6 +180,7 @@ export default function Register() {
               </div>
             </div>
 
+            {/* Confirm Password */}
             <div>
               <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
                 Confirm Password

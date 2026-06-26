@@ -31,16 +31,24 @@ export function AuthProvider({ children }) {
     setSession(null);
   }, []);
 
-  const login = useCallback(async (phone, password) => {
-    const data = await api.post("/api/auth/login", { phone, password });
+  const login = useCallback(async (email, password) => {
+    const data = await api.post("/api/auth/login", { email, password });
     if (!data.success) throw new Error(data.message || "Login failed");
     if (data.data.user.role !== "client") throw new Error("Not a client account. Please use the correct portal.");
     persistSession(data.data.user, data.data.tokens);
     return data.data.user;
   }, [persistSession]);
 
-  const register = useCallback(async ({ name, phone, password }) => {
-    const data = await api.post("/api/auth/register", { name, phone, password, role: "client" });
+  const googleLogin = useCallback(async (idToken) => {
+    const data = await api.post("/api/auth/google", { id_token: idToken, role: "client" });
+    if (!data.success) throw new Error(data.message || "Google Sign-In failed");
+    if (data.data.user.role !== "client") throw new Error("This Google account is registered under a different portal. Please use the correct portal.");
+    persistSession(data.data.user, data.data.tokens);
+    return { user: data.data.user, needs_phone: !!data.data.needs_phone };
+  }, [persistSession]);
+
+  const register = useCallback(async ({ name, email, phone, password }) => {
+    const data = await api.post("/api/auth/register", { name, email, phone: phone || undefined, password, role: "client" });
     if (!data.success) throw new Error(data.message || "Registration failed");
     return data.data;
   }, []);
@@ -109,6 +117,7 @@ export function AuthProvider({ children }) {
         tokens: session?.tokens || null,
         isAuthenticated,
         login,
+        googleLogin,
         register,
         sendOtp,
         verifyOtp,

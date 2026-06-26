@@ -1,8 +1,10 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Truck, Phone, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
+import { Truck, Mail, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 const FEATURES = [
   { icon: Truck, label: "Book Instantly", desc: "Reserve trucks in under 2 minutes" },
@@ -13,27 +15,87 @@ const FEATURES = [
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
+  const { login, googleLogin, isAuthenticated } = useAuth();
   const toast = useToast();
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
-  const phoneInputRef = useRef(null);
+  const emailInputRef = useRef(null);
+  const googleBtnRef = useRef(null);
 
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
-    phoneInputRef.current?.focus();
+    emailInputRef.current?.focus();
   }, [isAuthenticated, navigate]);
+
+  // Use a ref so the GSI callback always captures the latest state/functions
+  const credentialHandlerRef = useRef(null);
+  credentialHandlerRef.current = async ({ credential }) => {
+    setError("");
+    setGoogleLoading(true);
+    try {
+      const { user, needs_phone } = await googleLogin(credential);
+      toast.success(`Welcome, ${user.name}!`, "Signed in with Google");
+      navigate("/");
+      if (needs_phone) {
+        setTimeout(() => toast.info("Add your phone number in profile settings for full access."), 600);
+      }
+    } catch (err) {
+      setError(err.message || "Google Sign-In failed. Please try again.");
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const clientId = GOOGLE_CLIENT_ID;
+    if (!clientId || clientId.startsWith("your-") || !googleBtnRef.current) return;
+
+    const renderButton = () => {
+      if (!window.google?.accounts?.id || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (res) => credentialHandlerRef.current?.(res),
+      });
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: "outline",
+        size: "large",
+        text: "signin_with",
+        shape: "rectangular",
+        width: googleBtnRef.current.clientWidth || 340,
+      });
+    };
+
+    if (window.google?.accounts?.id) { renderButton(); return; }
+
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", renderButton);
+      return () => existing.removeEventListener("load", renderButton);
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = renderButton;
+    document.head.appendChild(script);
+  }, []);
+
+  const showGoogleBtn = GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith("your-");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const user = await login(phone, password);
+      const user = await login(email, password);
       toast.success(`Welcome back, ${user.name}!`, "Login Successful");
       navigate("/");
     } catch (err) {
@@ -118,18 +180,16 @@ export default function Login() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                  Phone Number
+                  Email Address
                 </label>
                 <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                  <Phone className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
-                  <span className="text-neutral-400 text-sm mr-1 select-none">+91</span>
+                  <Mail className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
                   <input
-                    ref={phoneInputRef}
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    placeholder="Enter mobile number"
-                    inputMode="numeric"
+                    ref={emailInputRef}
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
                     required
                     className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
                   />
@@ -186,9 +246,31 @@ export default function Login() {
               </button>
             </form>
 
+            {showGoogleBtn && (
+              <>
+                <div className="relative my-5">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-neutral-200" />
+                  </div>
+                  <div className="relative flex justify-center">
+                    <span className="bg-neutral px-3 text-xs text-neutral-400">or continue with</span>
+                  </div>
+                </div>
+
+                <div ref={googleBtnRef} className="w-full flex justify-center" style={{ minHeight: 44 }} />
+
+                {googleLoading && (
+                  <p className="text-xs text-neutral-400 text-center mt-2 flex items-center justify-center gap-1.5">
+                    <span className="w-3 h-3 border border-neutral-300 border-t-primary rounded-full animate-spin" />
+                    Signing in with Google...
+                  </p>
+                )}
+              </>
+            )}
+
             <div className="mt-6 p-4 bg-white rounded-xl border border-neutral-100">
               <p className="text-xs text-neutral-400 mb-2 font-medium">Demo credentials</p>
-              <p className="text-xs text-neutral-600 font-mono">Phone: 9000000002</p>
+              <p className="text-xs text-neutral-600 font-mono">Email: client@ssklogistics.in</p>
               <p className="text-xs text-neutral-600 font-mono mt-1">Password: Admin@123456</p>
             </div>
 
