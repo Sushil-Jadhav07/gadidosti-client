@@ -270,8 +270,8 @@ export default function Login() {
 
             <div className="mt-6 p-4 bg-white rounded-xl border border-neutral-100">
               <p className="text-xs text-neutral-400 mb-2 font-medium">Demo credentials</p>
-              <p className="text-xs text-neutral-600 font-mono">Email: client@ssklogistics.in</p>
-              <p className="text-xs text-neutral-600 font-mono mt-1">Password: Admin@123456</p>
+              <p className="text-xs text-neutral-600 font-mono">Email: client@gmail.com</p>
+              <p className="text-xs text-neutral-600 font-mono mt-1">Password: client@123</p>
             </div>
 
             <p className="text-sm text-neutral-500 text-center mt-5">
