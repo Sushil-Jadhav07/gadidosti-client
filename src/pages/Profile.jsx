@@ -1,12 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Receipt, MapPin, CreditCard, Bell, Headphones, FileText,
   LogOut, ChevronRight, Phone, Mail, Pencil, Package, Wallet, CalendarDays,
+  Building2, Lock, Eye, EyeOff, AlertCircle, CheckCheck, KeyRound,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { useNotifications, timeAgo } from "../hooks/useNotifications";
 import { BOOKINGS } from "../data/mockData";
 
 const MENU_SECTIONS = [
@@ -22,7 +24,8 @@ const MENU_SECTIONS = [
     items: [
       { icon: MapPin, label: "Saved Addresses", action: "coming_soon" },
       { icon: CreditCard, label: "Payment Methods", action: "coming_soon" },
-      { icon: Bell, label: "Notifications", action: "coming_soon" },
+      { icon: Bell, label: "Notifications", action: "notifications" },
+      { icon: KeyRound, label: "Change Password", action: "change_password" },
     ],
   },
   {
@@ -36,7 +39,7 @@ const MENU_SECTIONS = [
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile, changePassword } = useAuth();
   const toast = useToast();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -48,9 +51,84 @@ export default function Profile() {
   const totalSpent = BOOKINGS.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0);
   const delivered = BOOKINGS.filter((b) => b.status === "Delivered").length;
 
+  // ── Edit profile ──
+  const [showEditSheet, setShowEditSheet] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", email: "", address: "", company_name: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  const openEditSheet = () => {
+    setEditForm({
+      name: user?.name || "",
+      email: user?.email || "",
+      address: user?.address || "",
+      company_name: user?.company_name || "",
+    });
+    setEditError("");
+    setShowEditSheet(true);
+  };
+
+  const handleSaveProfile = async () => {
+    setEditError("");
+    setEditSaving(true);
+    try {
+      await updateProfile(editForm);
+      toast.success("Profile updated successfully");
+      setShowEditSheet(false);
+    } catch (err) {
+      setEditError(err.message || "Failed to update profile");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ── Change password ──
+  const [showPwSheet, setShowPwSheet] = useState(false);
+  const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
+  const [showPw, setShowPw] = useState({ current: false, next: false, confirm: false });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState("");
+
+  const handleChangePassword = async () => {
+    setPwError("");
+    if (!passwords.current || !passwords.next || !passwords.confirm) {
+      return setPwError("Please fill all password fields");
+    }
+    if (passwords.next !== passwords.confirm) {
+      return setPwError("New passwords do not match");
+    }
+    if (passwords.next.length < 6) {
+      return setPwError("Password must be at least 6 characters");
+    }
+    setPwSaving(true);
+    try {
+      await changePassword(passwords.current, passwords.next);
+      toast.success("Password updated successfully");
+      setPasswords({ current: "", next: "", confirm: "" });
+      setShowPwSheet(false);
+    } catch (err) {
+      setPwError(err.message || "Failed to change password");
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  // ── Notifications ──
+  const [showNotifSheet, setShowNotifSheet] = useState(false);
+  const { notifications, unreadCount, loading: notifLoading, fetchNotifications, markRead, markAllRead } = useNotifications();
+
+  useEffect(() => {
+    if (showNotifSheet) fetchNotifications();
+  }, [showNotifSheet, fetchNotifications]);
+
   const handleMenuClick = (item) => {
     if (item.path) {
       navigate(item.path);
+    } else if (item.action === "notifications") {
+      setShowNotifSheet(true);
+    } else if (item.action === "change_password") {
+      setPwError("");
+      setShowPwSheet(true);
     } else if (item.action === "coming_soon") {
       toast.info("This feature is coming soon!");
     }
@@ -94,7 +172,7 @@ export default function Profile() {
               </div>
 
               <button
-                onClick={() => toast.info("Edit profile coming soon!")}
+                onClick={openEditSheet}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-xs font-medium text-white hover:bg-white/20 transition-colors"
               >
                 <Pencil className="w-3.5 h-3.5" />
@@ -182,6 +260,11 @@ export default function Profile() {
                       <item.icon className="w-4 h-4 text-neutral-400 group-hover:text-neutral-600 transition-colors" />
                     </div>
                     <span className="flex-1 text-sm font-medium text-neutral-700">{item.label}</span>
+                    {item.action === "notifications" && unreadCount > 0 && (
+                      <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-danger text-white text-[10px] font-bold rounded-full">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
                     <ChevronRight className="w-4 h-4 text-neutral-300 flex-shrink-0" />
                   </button>
                 ))}
@@ -229,6 +312,162 @@ export default function Profile() {
               Yes, Sign Out
             </button>
           </div>
+        </div>
+      </BottomSheet>
+
+      {/* Edit Profile */}
+      <BottomSheet isOpen={showEditSheet} onClose={() => setShowEditSheet(false)}>
+        <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-5">Edit Profile</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Full Name</label>
+            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+              <Pencil className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="text"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Email Address</label>
+            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+              <Mail className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Company Name <span className="text-neutral-300 font-normal normal-case">(optional)</span></label>
+            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+              <Building2 className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="text"
+                value={editForm.company_name}
+                onChange={(e) => setEditForm((f) => ({ ...f, company_name: e.target.value }))}
+                placeholder="Booking on behalf of a business?"
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Address <span className="text-neutral-300 font-normal normal-case">(optional)</span></label>
+            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+              <MapPin className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="text"
+                value={editForm.address}
+                onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="Street, city, state, pincode"
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+          </div>
+
+          {editError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {editError}
+            </div>
+          )}
+
+          <button
+            onClick={handleSaveProfile}
+            disabled={editSaving}
+            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {editSaving ? (
+              <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving...</>
+            ) : "Save Changes"}
+          </button>
+        </div>
+      </BottomSheet>
+
+      {/* Change Password */}
+      <BottomSheet isOpen={showPwSheet} onClose={() => setShowPwSheet(false)}>
+        <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-5">Change Password</h3>
+        <div className="space-y-4">
+          {[
+            { key: "current", label: "Current Password", placeholder: "Enter current password" },
+            { key: "next", label: "New Password", placeholder: "Min 6 characters" },
+            { key: "confirm", label: "Confirm New Password", placeholder: "Repeat new password" },
+          ].map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">{label}</label>
+              <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+                <Lock className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+                <input
+                  type={showPw[key] ? "text" : "password"}
+                  value={passwords[key]}
+                  onChange={(e) => setPasswords((p) => ({ ...p, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                />
+                <button type="button" onClick={() => setShowPw((p) => ({ ...p, [key]: !p[key] }))} className="text-neutral-400 hover:text-neutral-600">
+                  {showPw[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {pwError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {pwError}
+            </div>
+          )}
+
+          <button
+            onClick={handleChangePassword}
+            disabled={pwSaving}
+            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {pwSaving ? (
+              <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Updating...</>
+            ) : "Update Password"}
+          </button>
+        </div>
+      </BottomSheet>
+
+      {/* Notifications */}
+      <BottomSheet isOpen={showNotifSheet} onClose={() => setShowNotifSheet(false)}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-poppins font-semibold text-lg text-neutral-800">Notifications</h3>
+          {unreadCount > 0 && (
+            <button onClick={markAllRead} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+            </button>
+          )}
+        </div>
+        <div className="divide-y divide-neutral-50">
+          {notifLoading ? (
+            <div className="py-10 flex justify-center">
+              <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+            </div>
+          ) : notifications.length === 0 ? (
+            <p className="text-sm text-neutral-400 text-center py-10">No notifications yet</p>
+          ) : (
+            notifications.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => !n.is_read && markRead(n.id)}
+                className={`w-full text-left py-3.5 flex gap-3 ${!n.is_read ? "bg-primary-50 -mx-5 px-5" : ""}`}
+              >
+                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${!n.is_read ? "bg-primary" : "bg-transparent"}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-neutral-800">{n.title}</p>
+                  <p className="text-xs text-neutral-500 mt-0.5">{n.message}</p>
+                  <p className="text-[11px] text-neutral-300 mt-1">{timeAgo(n.created_at)}</p>
+                </div>
+              </button>
+            ))
+          )}
         </div>
       </BottomSheet>
     </div>

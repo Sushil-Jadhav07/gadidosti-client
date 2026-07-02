@@ -53,6 +53,21 @@ export function AuthProvider({ children }) {
     return data.data;
   }, []);
 
+  const updateProfile = useCallback(async ({ name, email, address, company_name }) => {
+    if (!session?.tokens) throw new Error("Not authenticated");
+    const data = await api.patch("/api/users/profile", { name, email, address, company_name }, session.tokens.access_token);
+    if (!data.success) throw new Error(data.message || "Failed to update profile");
+    persistSession(data.data.user, session.tokens);
+    return data.data.user;
+  }, [session, persistSession]);
+
+  const changePassword = useCallback(async (current_password, new_password) => {
+    if (!session?.tokens) throw new Error("Not authenticated");
+    const data = await api.patch("/api/users/change-password", { current_password, new_password }, session.tokens.access_token);
+    if (!data.success) throw new Error(data.message || "Failed to change password");
+    return data.data;
+  }, [session]);
+
   const sendOtp = useCallback(async (phone) => {
     const data = await api.post("/api/auth/otp/send", { phone, purpose: "phone_verify" });
     if (!data.success) throw new Error(data.message || "Failed to send OTP");
@@ -119,6 +134,8 @@ export function AuthProvider({ children }) {
         login,
         googleLogin,
         register,
+        updateProfile,
+        changePassword,
         sendOtp,
         verifyOtp,
         logout,
