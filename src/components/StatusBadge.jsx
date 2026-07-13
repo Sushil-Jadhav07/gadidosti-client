@@ -1,4 +1,5 @@
 import React from "react";
+import { formatBookingStatus } from "../utils";
 
 const STATUS_STYLES = {
   Assigned: "bg-primary-50 text-primary border border-primary-100",
@@ -11,10 +12,11 @@ const STATUS_STYLES = {
 };
 
 export default function StatusBadge({ status, className = "" }) {
-  const style = STATUS_STYLES[status] || STATUS_STYLES.Requested;
+  const label = formatBookingStatus(status);
+  const style = STATUS_STYLES[label] || STATUS_STYLES.Requested;
   return (
     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${style} ${className}`}>
-      {status}
+      {label}
     </span>
   );
 }

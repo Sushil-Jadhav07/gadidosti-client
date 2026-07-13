@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 export default function BottomSheet({ isOpen, onClose, children }) {
@@ -23,7 +24,7 @@ export default function BottomSheet({ isOpen, onClose, children }) {
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center md:p-6">
       {/* Backdrop */}
       <div
@@ -51,6 +52,7 @@ export default function BottomSheet({ isOpen, onClose, children }) {
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

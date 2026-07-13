@@ -2,11 +2,12 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Package, Wallet, Truck, MapPin, Receipt, Headphones,
-  ArrowRight, CheckCircle, TrendingUp,
+  ArrowRight, CheckCircle, TrendingUp, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import StatusBadge from "../components/StatusBadge";
-import { BOOKINGS, TIMELINE_STEPS } from "../data/mockData";
+import { api, getToken } from "../services/api";
+import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
 
 function CountUp({ end, duration = 800, prefix = "", suffix = "" }) {
   const [value, setValue] = useState(0);
@@ -35,30 +36,47 @@ function CountUp({ end, duration = 800, prefix = "", suffix = "" }) {
 export default function Home() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const token = getToken();
 
   const stats = useMemo(
     () => ({
-      active: BOOKINGS.filter((b) => b.status === "Assigned" || b.status === "In Transit").length,
-      total: BOOKINGS.length,
-      spent: BOOKINGS.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0),
-      delivered: BOOKINGS.filter((b) => b.status === "Delivered").length,
+      active: bookings.filter((b) => ["Assigned", "In Transit", "En Route", "Picked Up", "Confirmed"].includes(b.status)).length,
+      total: bookings.length,
+      spent: bookings.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0),
+      delivered: bookings.filter((b) => b.status === "Delivered" || b.status === "Completed").length,
     }),
-    []
+    [bookings]
   );
 
-  const recentBookings = useMemo(() => BOOKINGS.slice(0, 6), []);
+  const recentBookings = useMemo(() => bookings.slice(0, 5), [bookings]);
+
+  const loadBookings = async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const response = await api.get("/api/bookings?limit=100", token);
+      if (!response?.success) throw new Error(response?.message || "Failed to load bookings");
+      setBookings((response.data?.bookings || response.data || []).map(adaptBooking));
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(timer);
+    loadBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const quickActions = [
     { label: "Book a Truck", icon: Truck, color: "bg-primary", desc: "New booking", path: "/book" },
-    { label: "Track Shipment", icon: MapPin, color: "bg-success", desc: "Live tracking", path: "/track" },
-    { label: "My Invoices", icon: Receipt, color: "bg-secondary", desc: "View invoices", path: "/bookings" },
-    { label: "Support", icon: Headphones, color: "bg-warning", desc: "Get help", path: "/profile" },
+    { label: "Track Shipment", icon: MapPin, color: "bg-primary", desc: "Live tracking", path: "/track" },
+    { label: "My Invoices", icon: Receipt, color: "bg-primary", desc: "View invoices", path: "/bookings" },
+    { label: "Support", icon: Headphones, color: "bg-primary", desc: "Get help", path: "/profile" },
   ];
 
   const statCards = [
@@ -76,8 +94,8 @@ export default function Home() {
       value: stats.total,
       display: null,
       icon: Package,
-      color: "text-success",
-      bg: "bg-success/10",
+      color: "text-primary",
+      bg: "bg-primary/10",
       trend: "All time",
     },
     {
@@ -85,8 +103,8 @@ export default function Home() {
       value: stats.delivered,
       display: null,
       icon: CheckCircle,
-      color: "text-tertiary",
-      bg: "bg-tertiary/10",
+      color: "text-primary",
+      bg: "bg-primary/10",
       trend: "Successfully",
     },
     {
@@ -94,8 +112,8 @@ export default function Home() {
       value: null,
       display: `₹${Math.round(stats.spent / 1000) / 10}L`,
       icon: Wallet,
-      color: "text-warning",
-      bg: "bg-warning/10",
+      color: "text-primary",
+      bg: "bg-primary/10",
       trend: "All time value",
     },
   ];
@@ -107,8 +125,11 @@ export default function Home() {
         {statCards.map((card) => (
           <div
             key={card.label}
-            className="bg-white rounded-xl shadow-card p-4 md:p-5 flex items-start gap-3 md:gap-4 hover:shadow-card-hover transition-shadow duration-200"
+            className="relative bg-white rounded-xl shadow-card p-4 md:p-5 flex items-start gap-3 md:gap-4 hover:shadow-card-hover transition-shadow duration-200"
           >
+            <div className="absolute -top-2.5 -right-2.5 w-6 h-6 rounded-full bg-success flex items-center justify-center shadow-card" title={card.trend}>
+              <TrendingUp className="w-3.5 h-3.5 text-white" />
+            </div>
             <div
               className={`w-10 h-10 md:w-12 md:h-12 rounded-xl ${card.bg} flex items-center justify-center flex-shrink-0`}
             >
@@ -123,8 +144,7 @@ export default function Home() {
                 )}
               </p>
               <p className="text-xs md:text-sm text-neutral-500 mt-0.5">{card.label}</p>
-              <p className="text-[10px] md:text-xs text-neutral-300 mt-1 hidden sm:flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
+              <p className="text-[10px] md:text-xs text-neutral-300 mt-1 hidden sm:block">
                 {card.trend}
               </p>
             </div>
@@ -172,6 +192,22 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <AlertTriangle className="w-10 h-10 text-danger/40 mb-3" />
+                <p className="text-sm text-neutral-400 mb-3">Couldn't load recent bookings</p>
+                <button
+                  onClick={loadBookings}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Retry
+                </button>
+              </div>
+            ) : recentBookings.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Package className="w-10 h-10 text-neutral-200 mb-3" />
+                <p className="text-sm text-neutral-400">No bookings yet</p>
+              </div>
             ) : (
               <div className="divide-y divide-neutral-50">
                 {recentBookings.map((booking) => (
@@ -183,7 +219,7 @@ export default function Home() {
                     {/* Desktop row */}
                     <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1fr] px-5 py-4 items-center">
                       <div>
-                        <p className="text-[11px] text-neutral-400 font-medium mb-0.5">{booking.id}</p>
+                        <p className="text-[11px] text-neutral-400 font-medium mb-0.5">{bookingRef(booking)}</p>
                         <p className="text-sm font-semibold text-neutral-700">
                           {booking.pickup} → {booking.drop}
                         </p>
@@ -200,7 +236,7 @@ export default function Home() {
                     <div className="md:hidden px-4 py-3">
                       <div className="flex items-start justify-between">
                         <div className="min-w-0 mr-3">
-                          <p className="text-[10px] text-neutral-400 mb-0.5">{booking.id}</p>
+                          <p className="text-[10px] text-neutral-400 mb-0.5">{bookingRef(booking)}</p>
                           <p className="text-sm font-semibold text-neutral-700 truncate">
                             {booking.pickup} → {booking.drop}
                           </p>
@@ -248,7 +284,7 @@ export default function Home() {
           {/* Promotional Banner */}
           <div
             className="relative rounded-xl overflow-hidden h-[160px] md:h-[180px] cursor-pointer hover:scale-[1.01] transition-transform duration-200"
-            style={{ background: "linear-gradient(135deg, #17D86B 0%, #0EA5A0 100%)" }}
+            style={{ background: "linear-gradient(135deg, #1565C0 0%, #1976FF 100%)" }}
             onClick={() => navigate("/book")}
           >
             <div className="absolute inset-0 opacity-10">
@@ -278,10 +314,10 @@ export default function Home() {
             <h4 className="font-poppins font-semibold text-base text-neutral-800 mb-4">Shipment Summary</h4>
             <div className="space-y-3">
               {[
-                { label: "In Transit", count: BOOKINGS.filter(b => b.status === "In Transit").length, color: "bg-warning" },
-                { label: "Delivered", count: BOOKINGS.filter(b => b.status === "Delivered").length, color: "bg-success" },
-                { label: "Assigned", count: BOOKINGS.filter(b => b.status === "Assigned").length, color: "bg-primary" },
-                { label: "Cancelled", count: BOOKINGS.filter(b => b.status === "Cancelled").length, color: "bg-danger" },
+                { label: "In Transit", count: bookings.filter(b => b.status === "In Transit").length, color: "bg-warning" },
+                { label: "Delivered", count: bookings.filter(b => b.status === "Delivered" || b.status === "Completed").length, color: "bg-success" },
+                { label: "Assigned", count: bookings.filter(b => b.status === "Assigned").length, color: "bg-primary" },
+                { label: "Cancelled", count: bookings.filter(b => b.status === "Cancelled").length, color: "bg-danger" },
               ].map((item) => (
                 <div key={item.label} className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
@@ -292,7 +328,7 @@ export default function Home() {
                     <div className="w-20 md:w-24 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
                       <div
                         className={`h-full ${item.color} rounded-full`}
-                        style={{ width: `${(item.count / BOOKINGS.length) * 100}%` }}
+                        style={{ width: `${bookings.length ? (item.count / bookings.length) * 100 : 0}%` }}
                       />
                     </div>
                     <span className="text-sm font-semibold text-neutral-700 w-4 text-right">{item.count}</span>
@@ -317,7 +353,7 @@ function BookingDetailContent({ booking }) {
     <div>
       <div className="flex items-center justify-between mb-5 pr-8">
         <div>
-          <h3 className="font-poppins font-semibold text-lg text-neutral-800">{booking.id}</h3>
+          <h3 className="font-poppins font-semibold text-lg text-neutral-800">{bookingRef(booking)}</h3>
           <p className="text-sm text-neutral-400 mt-0.5">
             {booking.pickup} → {booking.drop}
           </p>
@@ -413,7 +449,7 @@ function BookingDetailContent({ booking }) {
         </div>
       </div>
 
-      {booking.driver && (
+      {booking.driver?.name && (
         <div className="bg-neutral-50 rounded-lg p-3">
           <p className="text-[10px] text-neutral-400 mb-1">Driver</p>
           <p className="text-sm font-medium text-neutral-700">{booking.driver.name}</p>

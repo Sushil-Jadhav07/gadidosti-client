@@ -68,25 +68,17 @@ export function AuthProvider({ children }) {
     return data.data;
   }, [session]);
 
-  const sendOtp = useCallback(async (phone) => {
-    const data = await api.post("/api/auth/otp/send", { phone, purpose: "phone_verify" });
-    if (!data.success) throw new Error(data.message || "Failed to send OTP");
-    return data.data;
-  }, []);
-
-  const verifyOtp = useCallback(async (phone, otp) => {
-    const data = await api.post("/api/auth/otp/verify", { phone, otp, purpose: "phone_verify" });
-    if (!data.success) throw new Error(data.message || "Invalid or expired OTP");
-    return data.data;
-  }, []);
-
+  // Clears the local session immediately rather than waiting on the network call —
+  // api.js's fetch wrapper has no timeout, so if the backend is slow/unreachable this
+  // would otherwise hang forever with clearSession() never running, making Sign Out
+  // look like it does nothing. The server-side token revocation is best-effort and
+  // fired in the background; it doesn't need to block the user from being signed out.
   const logout = useCallback(async () => {
-    try {
-      if (session?.tokens) {
-        await api.post("/api/auth/logout", { refresh_token: session.tokens.refresh_token }, session.tokens.access_token);
-      }
-    } catch {}
+    const tokens = session?.tokens;
     clearSession();
+    if (tokens) {
+      api.post("/api/auth/logout", { refresh_token: tokens.refresh_token }, tokens.access_token).catch(() => {});
+    }
   }, [session, clearSession]);
 
   const refreshTokens = useCallback(async () => {
@@ -136,8 +128,6 @@ export function AuthProvider({ children }) {
         register,
         updateProfile,
         changePassword,
-        sendOtp,
-        verifyOtp,
         logout,
         refreshTokens,
         forgotPassword,

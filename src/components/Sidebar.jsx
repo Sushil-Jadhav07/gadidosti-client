@@ -17,6 +17,11 @@ export default function Sidebar({ isOpen, onClose }) {
   const { user, logout } = useAuth();
   const currentPath = location.pathname;
 
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
   return (
     <aside
       className={`fixed left-0 top-0 h-screen w-64 bg-secondary flex flex-col z-40 shadow-xl transition-transform duration-300
@@ -73,7 +78,7 @@ export default function Sidebar({ isOpen, onClose }) {
           </div>
         </div>
         <button
-          onClick={logout}
+          onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-white/50 hover:bg-red-500/10 hover:text-red-400 transition-all duration-150"
         >
           <LogOut size={16} className="flex-shrink-0" />

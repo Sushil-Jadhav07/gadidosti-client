@@ -1,27 +1,84 @@
-import React, { useState, useMemo } from "react";
-import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock, AlertTriangle } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
-import { BOOKINGS, TIMELINE_STEPS } from "../data/mockData";
+import { api, getToken } from "../services/api";
+import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
+
+// Friendly, non-technical phrasing for the tracking banner — never expose the raw enum value.
+const INCIDENT_REASON_LABELS = {
+  accident: "an accident",
+  breakdown: "a vehicle breakdown",
+  traffic_block: "a traffic block",
+  medical: "a medical issue",
+  other: "an issue",
+};
 
 export default function TrackShipment() {
   const [searchId, setSearchId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeBooking, setActiveBooking] = useState(null);
+  const [incident, setIncident] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [noBookingsYet, setNoBookingsYet] = useState(false);
+  const token = getToken();
 
-  const activeBooking = useMemo(() => {
-    if (searchQuery) {
-      return BOOKINGS.find((b) => b.id.toLowerCase() === searchQuery.toLowerCase()) || null;
+  useEffect(() => {
+    const loadLatest = async () => {
+      try {
+        const response = await api.get("/api/bookings?limit=100", token);
+        const list = response?.data?.bookings || response?.data || [];
+        const live = list.find((b) => ["assigned", "en_route_pickup", "picked_up", "in_transit"].includes(b.status)) || list[0];
+        if (live) {
+          setActiveBooking(adaptBooking(live));
+        } else {
+          setNoBookingsYet(true);
+        }
+      } catch {
+        setNoBookingsYet(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadLatest();
+  }, [token]);
+
+  // Booking list/search responses don't carry incident data — that only comes back from
+  // the dedicated tracking endpoint, so it's fetched separately once we know which booking
+  // is being shown.
+  useEffect(() => {
+    if (!activeBooking?.id) {
+      setIncident(null);
+      return;
     }
-    return BOOKINGS.find((b) => b.id === "BKG-202412-001") || BOOKINGS[0];
-  }, [searchQuery]);
+    let cancelled = false;
+    const loadIncident = async () => {
+      try {
+        const response = await api.get(`/api/bookings/${activeBooking.id}/track`, token);
+        if (!cancelled) setIncident(response?.data?.incident || null);
+      } catch {
+        if (!cancelled) setIncident(null);
+      }
+    };
+    loadIncident();
+    return () => { cancelled = true; };
+  }, [activeBooking?.id, token]);
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!searchId.trim()) return;
     setSearching(true);
-    setTimeout(() => {
+    try {
+      const query = searchId.trim();
+      const response = await api.get(`/api/bookings/${query}`, token);
+      setSearchQuery(query);
+      setActiveBooking(adaptBooking(response.data?.booking));
+    } catch {
       setSearchQuery(searchId.trim());
+      setActiveBooking(null);
+    } finally {
       setSearching(false);
-    }, 500);
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -57,15 +114,34 @@ export default function TrackShipment() {
         </button>
       </div>
 
-      {activeBooking ? (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 md:gap-6">
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 md:py-32 bg-white rounded-xl shadow-card">
+          <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+          <p className="text-sm text-neutral-400">Loading your shipments...</p>
+        </div>
+      ) : activeBooking ? (
+        <>
+          {incident && (
+            <div className="bg-orange-50 border border-yellow-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-card">
+                <AlertTriangle className="w-5 h-5 text-warning" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-neutral-800">
+                  Your driver reported {INCIDENT_REASON_LABELS[incident.reason] || "an issue"} and support has been notified.
+                </p>
+                <p className="text-xs text-neutral-500 mt-0.5">We're arranging a solution and will keep you updated.</p>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 md:gap-6">
           {/* Left Panel */}
           <div className="lg:col-span-2 space-y-4 md:space-y-5">
             {/* Booking Summary Card */}
             <div className="bg-white rounded-xl shadow-card p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-xs text-neutral-400 font-medium mb-0.5">{activeBooking.id}</p>
+                  <p className="text-xs text-neutral-400 font-medium mb-0.5">{bookingRef(activeBooking)}</p>
                   <div className="flex items-center gap-2">
                     <span className="font-poppins font-bold text-base text-neutral-800">
                       {activeBooking.pickup}
@@ -95,7 +171,9 @@ export default function TrackShipment() {
               )}
 
               {/* Driver Info */}
-              {activeBooking.driver && (
+              {/* Backend always returns a driver object ({name: null, phone: null} before assignment) —
+                  check for an actual name, not just object presence, or this crashes on .split(" "). */}
+              {activeBooking.driver?.name && (
                 <div className="flex items-center justify-between py-3 border-t border-neutral-50">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -118,51 +196,59 @@ export default function TrackShipment() {
               )}
             </div>
 
-            {/* Status Timeline */}
+            {/* Status Timeline — horizontal */}
             <div className="bg-white rounded-xl shadow-card p-5">
               <h3 className="font-poppins font-semibold text-base text-neutral-800 mb-4">Shipment Timeline</h3>
-              <div className="space-y-0">
-                {TIMELINE_STEPS.map((step, index) => {
-                  const isCompleted = index < activeBooking.currentStep;
-                  const isCurrent = index === activeBooking.currentStep;
-                  const isVisible = index <= Math.min(activeBooking.currentStep + 1, TIMELINE_STEPS.length - 1);
-                  if (!isVisible) return null;
+              {(() => {
+                const visibleSteps = TIMELINE_STEPS.map((step, index) => ({ step, index }))
+                  .filter(({ index }) => index <= Math.min(activeBooking.currentStep + 1, TIMELINE_STEPS.length - 1));
 
-                  return (
-                    <div key={step} className="flex items-start gap-3">
-                      <div className="flex flex-col items-center">
-                        <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            isCompleted
-                              ? "bg-success"
-                              : isCurrent
-                              ? "bg-primary ring-4 ring-primary/15"
-                              : "border-2 border-neutral-200 bg-white"
-                          }`}
-                        >
-                          {isCompleted && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                          {isCurrent && <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />}
-                        </div>
-                        {index < TIMELINE_STEPS.length - 1 && index <= activeBooking.currentStep && (
-                          <div className={`w-0.5 h-8 ${isCompleted ? "bg-success" : "bg-neutral-100"}`} />
-                        )}
-                      </div>
-                      <div className="pt-0.5 pb-4">
-                        <span
-                          className={`text-sm font-medium ${
-                            isCompleted ? "text-success" : isCurrent ? "text-primary font-semibold" : "text-neutral-300"
-                          }`}
-                        >
-                          {step}
-                        </span>
-                        {isCurrent && (
-                          <span className="block text-[11px] text-neutral-400 mt-0.5">Current Status</span>
-                        )}
-                      </div>
+                return (
+                  <>
+                    <div className="flex items-start overflow-x-auto no-scrollbar pb-1">
+                      {visibleSteps.map(({ step, index }, i) => {
+                        const isCompleted = index < activeBooking.currentStep;
+                        const isCurrent = index === activeBooking.currentStep;
+                        const isLast = i === visibleSteps.length - 1;
+
+                        return (
+                          <div key={step} className={`flex items-center ${isLast ? "" : "flex-1"} min-w-[70px]`}>
+                            <div className="flex flex-col items-center flex-shrink-0">
+                              <div
+                                className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                  isCompleted
+                                    ? "bg-success"
+                                    : isCurrent
+                                    ? "bg-primary ring-4 ring-primary/15"
+                                    : "border-2 border-neutral-200 bg-white"
+                                }`}
+                              >
+                                {isCompleted && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                {isCurrent && <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />}
+                              </div>
+                              <span
+                                className={`text-[11px] mt-1.5 text-center whitespace-nowrap ${
+                                  isCompleted ? "text-success font-medium" : isCurrent ? "text-primary font-semibold" : "text-neutral-300"
+                                }`}
+                              >
+                                {step}
+                              </span>
+                            </div>
+                            {!isLast && (
+                              <div className={`flex-1 h-0.5 mx-1 mb-4 ${isCompleted ? "bg-success" : "bg-neutral-100"}`} />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                    {activeBooking.currentStep < TIMELINE_STEPS.length && (
+                      <p className="text-[11px] text-neutral-400 mt-3">
+                        Current Status: <span className="font-medium text-primary">{TIMELINE_STEPS[activeBooking.currentStep]}</span>
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* Quick Stats */}
@@ -219,7 +305,7 @@ export default function TrackShipment() {
               {/* Booking ID chip */}
               <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-card">
                 <p className="text-[11px] text-neutral-400">Tracking</p>
-                <p className="text-xs font-semibold text-neutral-700">{activeBooking.id}</p>
+                <p className="text-xs font-semibold text-neutral-700">{bookingRef(activeBooking)}</p>
               </div>
 
               {/* Pickup Pin */}
@@ -291,13 +377,18 @@ export default function TrackShipment() {
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        </>
       ) : (
         <div className="flex flex-col items-center justify-center py-24 md:py-32 bg-white rounded-xl shadow-card">
           <MapPin className="w-16 h-16 text-neutral-200 mb-4" />
-          <h3 className="font-poppins font-semibold text-lg text-neutral-500 mb-1">Booking not found</h3>
+          <h3 className="font-poppins font-semibold text-lg text-neutral-500 mb-1">
+            {noBookingsYet && !searchQuery ? "No shipments to track yet" : "Booking not found"}
+          </h3>
           <p className="text-sm text-neutral-400 text-center px-4">
-            No booking found with ID &quot;{searchQuery}&quot;. Please check and try again.
+            {noBookingsYet && !searchQuery
+              ? "Book a truck to start tracking your shipments here."
+              : `No booking found with ID "${searchQuery}". Please check and try again.`}
           </p>
         </div>
       )}

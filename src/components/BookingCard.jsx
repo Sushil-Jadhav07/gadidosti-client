@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowRight, Truck, Calendar } from "lucide-react";
 import StatusBadge from "./StatusBadge";
+import { bookingRef } from "../utils";
 
 export default function BookingCard({ booking, onClick, showTrack = false }) {
   return (
@@ -9,7 +10,7 @@ export default function BookingCard({ booking, onClick, showTrack = false }) {
       className="bg-white rounded-xl shadow-card p-4 mb-3 transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5 cursor-pointer active:scale-[0.98]"
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-neutral-400 font-medium">{booking.id}</span>
+        <span className="text-xs text-neutral-400 font-medium">{bookingRef(booking)}</span>
         <StatusBadge status={booking.status} />
       </div>
 

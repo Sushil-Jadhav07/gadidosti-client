@@ -1,27 +1,87 @@
-import React, { useState, useMemo } from "react";
-import { MapPin, ArrowRight, Phone, Check, Package, Download, XCircle, Truck } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowRight, Check, Package, Download, XCircle, Truck, Copy, User, Building2,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard,
+} from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import StatusBadge from "../components/StatusBadge";
-import { BOOKINGS, TIMELINE_STEPS } from "../data/mockData";
+import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
+import { useAuth } from "../context/AuthContext";
+import { api, getToken } from "../services/api";
+import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
 
 const FILTER_TABS = ["All", "Active", "In Transit", "Delivered", "Cancelled"];
+const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
 
 export default function MyBookings() {
   const [activeFilter, setActiveFilter] = useState("All");
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
   const toast = useToast();
+  const { user } = useAuth();
+  const token = getToken();
+
+  const loadBookings = async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const response = await api.get("/api/bookings?limit=100", token);
+      if (!response?.success) throw new Error(response?.message || "Failed to load bookings");
+      setBookings((response.data?.bookings || response.data || []).map(adaptBooking));
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredBookings = useMemo(() => {
-    if (activeFilter === "All") return BOOKINGS;
+    if (activeFilter === "All") return bookings;
     if (activeFilter === "Active")
-      return BOOKINGS.filter((b) => b.status === "Assigned" || b.status === "Accepted");
-    return BOOKINGS.filter((b) => b.status === activeFilter);
-  }, [activeFilter]);
+      return bookings.filter((b) => ["Assigned", "Confirmed", "En Route", "Picked Up", "In Transit"].includes(b.status));
+    return bookings.filter((b) => b.status === activeFilter);
+  }, [activeFilter, bookings]);
 
-  const handleCancel = () => {
-    toast.info("Booking cancellation request submitted");
-    setSelectedBooking(null);
+  const handleCancel = async (bookingId) => {
+    try {
+      const res = await api.patch(`/api/bookings/${bookingId}/cancel`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "This booking can no longer be cancelled");
+      setBookings((current) => current.map((booking) => (
+        booking.id === bookingId
+          ? { ...booking, status: "Cancelled", paymentStatus: "Refunded" }
+          : booking
+      )));
+      toast.success("Booking cancelled");
+      setSelectedBooking(null);
+    } catch (err) {
+      toast.error(err?.message || "Failed to cancel booking");
+    }
+  };
+
+  const handlePaySuccess = async () => {
+    setShowPaymentSheet(false);
+    if (!selectedBooking) return;
+    try {
+      const res = await api.patch(`/api/bookings/${selectedBooking.id}/pay`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to record payment");
+      setBookings((current) => current.map((booking) => (
+        booking.id === selectedBooking.id ? { ...booking, paymentStatus: "Paid" } : booking
+      )));
+      setSelectedBooking((current) => (current ? { ...current, paymentStatus: "Paid" } : current));
+      toast.success("Payment recorded — thank you!");
+    } catch (err) {
+      toast.error(err?.message || "Failed to record payment");
+    }
   };
 
   return (
@@ -48,7 +108,24 @@ export default function MyBookings() {
         </div>
       </div>
 
-      {filteredBookings.length === 0 ? (
+      {loading ? (
+        <div className="bg-white rounded-xl shadow-card flex flex-col items-center justify-center py-24">
+          <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+          <p className="text-sm text-neutral-400">Loading your bookings...</p>
+        </div>
+      ) : error ? (
+        <div className="bg-white rounded-xl shadow-card flex flex-col items-center justify-center py-24">
+          <AlertTriangle className="w-12 h-12 text-danger/40 mb-3" />
+          <h3 className="font-poppins font-semibold text-lg text-neutral-500 mb-1">Couldn't load bookings</h3>
+          <p className="text-sm text-neutral-400 mb-4">Something went wrong. Please try again.</p>
+          <button
+            onClick={loadBookings}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" /> Retry
+          </button>
+        </div>
+      ) : filteredBookings.length === 0 ? (
         <div className="bg-white rounded-xl shadow-card flex flex-col items-center justify-center py-24">
           <Package className="w-14 h-14 text-neutral-200 mb-4" />
           <h3 className="font-poppins font-semibold text-lg text-neutral-500 mb-1">No bookings found</h3>
@@ -76,8 +153,8 @@ export default function MyBookings() {
                     onClick={() => setSelectedBooking(booking)}
                   >
                     <td className="px-5 py-4">
-                      <p className="text-xs font-mono font-medium text-neutral-500">{booking.id}</p>
-                      {booking.driver && (
+                      <p className="text-xs font-mono font-medium text-neutral-500">{bookingRef(booking)}</p>
+                      {booking.driver?.name && (
                         <p className="text-[11px] text-neutral-400 mt-0.5">{booking.driver.name}</p>
                       )}
                     </td>
@@ -143,11 +220,11 @@ export default function MyBookings() {
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="min-w-0 mr-3">
-                    <p className="text-[10px] font-mono text-neutral-400">{booking.id}</p>
+                    <p className="text-[10px] font-mono text-neutral-400">{bookingRef(booking)}</p>
                     <p className="text-sm font-semibold text-neutral-700 mt-0.5">
                       {booking.pickup} → {booking.drop}
                     </p>
-                    {booking.driver && (
+                    {booking.driver?.name && (
                       <p className="text-xs text-neutral-400 mt-0.5">{booking.driver.name}</p>
                     )}
                   </div>
@@ -186,131 +263,164 @@ export default function MyBookings() {
       {/* Booking Detail Modal */}
       <BottomSheet isOpen={!!selectedBooking} onClose={() => setSelectedBooking(null)}>
         {selectedBooking && (
-          <BookingDetailSheet booking={selectedBooking} onCancel={handleCancel} />
+          <BookingDetailSheet
+            booking={selectedBooking}
+            onCancel={() => handleCancel(selectedBooking.id)}
+            onPayNow={() => setShowPaymentSheet(true)}
+          />
         )}
       </BottomSheet>
+
+      <PaymentSheet
+        open={showPaymentSheet}
+        amount={selectedBooking?.amount}
+        phone={user?.phone}
+        onClose={() => setShowPaymentSheet(false)}
+        onSuccess={handlePaySuccess}
+        onPayLater={() => { setShowPaymentSheet(false); toast.info("You can pay anytime from My Bookings."); }}
+      />
     </div>
   );
 }
 
-function BookingDetailSheet({ booking, onCancel }) {
+function InfoTile({ icon: Icon, label, name, sub, tint = "primary" }) {
+  const tintClasses = tint === "success"
+    ? "bg-success/10 text-success"
+    : tint === "warning"
+    ? "bg-orange-50 text-warning"
+    : "bg-primary-50 text-primary";
+
   return (
-    <div className="pr-4">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-5 pr-6">
-        <div>
-          <h3 className="font-poppins font-semibold text-lg text-neutral-800">{booking.id}</h3>
-          <p className="text-sm text-neutral-400 mt-0.5">{booking.pickup} → {booking.drop}</p>
+    <div className="bg-neutral-50 rounded-lg p-3 flex items-start gap-2.5">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${tintClasses}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] text-neutral-400 mb-0.5">{label}</p>
+        <p className="text-sm font-medium text-neutral-700 truncate">{name || "—"}</p>
+        {sub && <p className="text-xs text-neutral-400 truncate">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function BookingDetailSheet({ booking, onCancel, onPayNow }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [cancelling, setCancelling] = useState(false);
+  const isLive = LIVE_STATUSES.includes(booking.status);
+  const isCancellable = booking.status === "Requested";
+  const isPayable = booking.paymentStatus === "Pending" && booking.status !== "Cancelled";
+
+  const copyId = () => {
+    navigator.clipboard?.writeText(bookingRef(booking));
+    toast.info("Booking ID copied");
+  };
+
+  const handleCancelClick = async () => {
+    setCancelling(true);
+    await onCancel();
+    setCancelling(false);
+  };
+
+  // Only draw connector lines between steps that are actually rendered/visible.
+  const visibleSteps = TIMELINE_STEPS.map((step, index) => ({ step, index }))
+    .filter(({ index }) => index <= Math.min(booking.currentStep + 1, TIMELINE_STEPS.length - 1));
+
+  return (
+    <div>
+      {/* Gradient Header Banner */}
+      <div
+        className="-mx-5 md:-mx-6 -mt-4 px-5 md:px-6 pt-5 pb-6 mb-5 text-white rounded-t-none"
+        style={{ background: "linear-gradient(135deg, #1565C0 0%, #1976FF 100%)" }}
+      >
+        <div className="flex items-start justify-between mb-4 pr-6">
+          <div>
+            <button
+              onClick={copyId}
+              className="flex items-center gap-1.5 text-white/90 hover:text-white transition-colors"
+            >
+              <span className="font-poppins font-semibold text-base">{bookingRef(booking)}</span>
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span className="text-sm font-medium">{booking.pickup}</span>
+              <ArrowRight className="w-3.5 h-3.5 text-white/70" />
+              <span className="text-sm font-medium">{booking.drop}</span>
+            </div>
+          </div>
+          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm whitespace-nowrap">
+            {booking.status}
+          </span>
         </div>
-        <StatusBadge status={booking.status} />
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white/10 rounded-lg py-2 px-3">
+            <p className="text-[10px] text-white/70 flex items-center gap-1"><Ruler className="w-3 h-3" /> Distance</p>
+            <p className="text-sm font-semibold mt-0.5">{booking.distance ? `${booking.distance} km` : "—"}</p>
+          </div>
+          <div className="bg-white/10 rounded-lg py-2 px-3">
+            <p className="text-[10px] text-white/70 flex items-center gap-1"><Truck className="w-3 h-3" /> Truck</p>
+            <p className="text-sm font-semibold mt-0.5 truncate">{booking.truckType || "—"}</p>
+          </div>
+          <div className="bg-white/10 rounded-lg py-2 px-3">
+            <p className="text-[10px] text-white/70">Amount</p>
+            <p className="text-sm font-semibold mt-0.5">₹{booking.amount.toLocaleString("en-IN")}</p>
+          </div>
+        </div>
       </div>
 
-      {/* Status Timeline */}
+      {/* Horizontal Status Timeline */}
       <div className="mb-5">
         <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-3">Status Timeline</p>
-        <div className="space-y-0">
-          {TIMELINE_STEPS.map((step, index) => {
+        <div className="flex items-start overflow-x-auto no-scrollbar pb-1">
+          {visibleSteps.map(({ step, index }, i) => {
             const isCompleted = index < booking.currentStep;
             const isCurrent = index === booking.currentStep;
-            const isVisible = index <= Math.min(booking.currentStep + 1, TIMELINE_STEPS.length - 1);
-            if (!isVisible) return null;
+            const isLast = i === visibleSteps.length - 1;
 
             return (
-              <div key={step} className="flex items-start gap-3">
-                <div className="flex flex-col items-center">
+              <div key={step} className={`flex items-center ${isLast ? "" : "flex-1"} min-w-[64px]`}>
+                <div className="flex flex-col items-center flex-shrink-0">
                   <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      isCompleted
-                        ? "bg-success"
-                        : isCurrent
-                        ? "bg-primary"
-                        : "border-2 border-neutral-200 bg-white"
+                    className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      isCompleted ? "bg-success" : isCurrent ? "bg-primary" : "border-2 border-neutral-200 bg-white"
                     }`}
                   >
-                    {isCompleted && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                    {isCompleted && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                     {isCurrent && <div className="w-2 h-2 rounded-full bg-white animate-pulse" />}
                   </div>
-                  {index < TIMELINE_STEPS.length - 1 && index <= booking.currentStep && (
-                    <div className={`w-0.5 h-6 ${isCompleted ? "bg-success" : "bg-neutral-200"}`} />
-                  )}
+                  <span
+                    className={`text-[10px] mt-1.5 text-center whitespace-nowrap ${
+                      isCompleted ? "text-success font-medium" : isCurrent ? "text-primary font-semibold" : "text-neutral-300"
+                    }`}
+                  >
+                    {step}
+                  </span>
                 </div>
-                <span
-                  className={`text-xs pt-0.5 ${
-                    isCompleted ? "text-success font-medium" : isCurrent ? "text-primary font-semibold" : "text-neutral-300"
-                  }`}
-                >
-                  {step}
-                </span>
+                {!isLast && (
+                  <div className={`flex-1 h-0.5 mx-1 mb-4 ${isCompleted ? "bg-success" : "bg-neutral-200"}`} />
+                )}
               </div>
             );
           })}
         </div>
-      </div>
-
-      {/* Route Map Placeholder */}
-      <div className="relative bg-neutral-100 rounded-xl h-[120px] mb-4 overflow-hidden flex items-center justify-center">
-        <div className="absolute inset-0 opacity-20">
-          <svg width="100%" height="100%">
-            <defs>
-              <pattern id="grid2" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#94A3B8" strokeWidth="0.5" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid2)" />
-          </svg>
-        </div>
-        <div className="relative z-10 flex items-center gap-6">
-          <div className="text-center">
-            <MapPin className="w-5 h-5 text-primary mx-auto" />
-            <span className="text-xs font-medium text-neutral-600 mt-1 block">{booking.pickup}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-12 h-0.5 bg-neutral-300" />
-            <div className="w-2.5 h-2.5 bg-primary rounded-full" />
-            <div className="w-12 h-0.5 bg-neutral-300" />
-          </div>
-          <div className="text-center">
-            <MapPin className="w-5 h-5 text-success mx-auto" />
-            <span className="text-xs font-medium text-neutral-600 mt-1 block">{booking.drop}</span>
-          </div>
-        </div>
+        {booking.currentStep < TIMELINE_STEPS.length && (
+          <p className="text-[11px] text-neutral-400 mt-2">
+            Current Status: <span className="font-medium text-primary">{TIMELINE_STEPS[booking.currentStep]}</span>
+          </p>
+        )}
       </div>
 
       {/* Info Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Client</p>
-          <p className="text-sm font-medium text-neutral-700">Rajesh Kumar</p>
-          <p className="text-xs text-neutral-400">+91 98765 43210</p>
-        </div>
-        {booking.broker && (
-          <div className="bg-neutral-50 rounded-lg p-3">
-            <p className="text-[10px] text-neutral-400 mb-1">Broker</p>
-            <p className="text-sm font-medium text-neutral-700">{booking.broker}</p>
-          </div>
-        )}
-        {booking.driver && (
-          <div className="bg-neutral-50 rounded-lg p-3">
-            <p className="text-[10px] text-neutral-400 mb-1">Driver</p>
-            <p className="text-sm font-medium text-neutral-700">{booking.driver.name}</p>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-neutral-400">{booking.driver.phone}</span>
-              <a
-                href={`tel:${booking.driver.phone}`}
-                className="w-6 h-6 rounded-full bg-success/10 flex items-center justify-center"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Phone className="w-3 h-3 text-success" />
-              </a>
-            </div>
-          </div>
+        <InfoTile icon={User} label="Client" name={booking.clientName || "You"} tint="primary" />
+        {booking.broker && <InfoTile icon={Building2} label="Broker" name={booking.broker} tint="primary" />}
+        {booking.driver?.name && (
+          <InfoTile icon={User} label="Driver" name={booking.driver.name} sub={booking.driver.phone} tint="success" />
         )}
         {booking.truckReg && (
-          <div className="bg-neutral-50 rounded-lg p-3">
-            <p className="text-[10px] text-neutral-400 mb-1">Truck</p>
-            <p className="text-sm font-medium text-neutral-700">{booking.truckReg}</p>
-            <p className="text-xs text-neutral-400">{booking.truckType}</p>
-          </div>
+          <InfoTile icon={Truck} label="Truck" name={booking.truckReg} sub={booking.truckType} tint="warning" />
         )}
       </div>
 
@@ -336,15 +446,15 @@ function BookingDetailSheet({ booking, onCancel }) {
       </div>
 
       {/* Pricing */}
-      <div className="bg-neutral-50 rounded-lg p-3 mb-5">
+      <div className="bg-primary-50 rounded-lg p-3 mb-5">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-xs text-neutral-400">Total Amount</span>
+          <span className="text-xs text-neutral-500">Total Amount</span>
           <span className="font-poppins font-bold text-lg text-primary">
             ₹{booking.amount.toLocaleString("en-IN")}
           </span>
         </div>
         <div className="flex justify-between items-center">
-          <span className="text-xs text-neutral-400">Payment Status</span>
+          <span className="text-xs text-neutral-500">Payment Status</span>
           <span
             className={`text-xs font-medium px-2 py-0.5 rounded-full ${
               booking.paymentStatus === "Paid"
@@ -360,18 +470,37 @@ function BookingDetailSheet({ booking, onCancel }) {
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
+        {isPayable && (
+          <button
+            onClick={onPayNow}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-success text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            <CreditCard className="w-4 h-4" />
+            Pay Now
+          </button>
+        )}
+        {isLive && (
+          <button
+            onClick={() => navigate(`/track?bookingId=${booking.id}`)}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
+          >
+            <Navigation className="w-4 h-4" />
+            Track Live
+          </button>
+        )}
         <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
           <Download className="w-4 h-4" />
           Download Invoice
         </button>
-        {booking.status === "Requested" && (
+        {isCancellable && (
           <button
-            onClick={onCancel}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            onClick={handleCancelClick}
+            disabled={cancelling}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
           >
             <XCircle className="w-4 h-4" />
-            Cancel
+            {cancelling ? "Cancelling..." : "Cancel"}
           </button>
         )}
       </div>

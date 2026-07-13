@@ -9,7 +9,8 @@ import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useNotifications, timeAgo } from "../hooks/useNotifications";
-import { BOOKINGS } from "../data/mockData";
+import { api, getToken } from "../services/api";
+import { adaptBooking, formatDate } from "../utils";
 
 const MENU_SECTIONS = [
   {
@@ -42,14 +43,45 @@ export default function Profile() {
   const { user, logout, updateProfile, changePassword } = useAuth();
   const toast = useToast();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [bookings, setBookings] = useState([]);
+  const [profile, setProfile] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState(false);
+  const token = getToken();
 
-  const initials = user?.name
-    ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+  const profileData = profile || user;
+
+  const initials = profileData?.name
+    ? profileData.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
     : 'RK';
 
-  const totalBookings = BOOKINGS.length;
-  const totalSpent = BOOKINGS.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0);
-  const delivered = BOOKINGS.filter((b) => b.status === "Delivered").length;
+  const totalBookings = bookings.length;
+  const totalSpent = bookings.filter((b) => b.status !== "Cancelled").reduce((sum, b) => sum + b.amount, 0);
+  const delivered = bookings.filter((b) => b.status === "Delivered" || b.status === "Completed").length;
+
+  const loadProfileData = async () => {
+    setStatsLoading(true);
+    setStatsError(false);
+    try {
+      const [profileRes, bookingsRes] = await Promise.all([
+        api.get("/api/users/profile", token),
+        api.get("/api/bookings?limit=100", token),
+      ]);
+      if (profileRes?.success && profileRes.data?.user) setProfile(profileRes.data.user);
+      if (bookingsRes?.success) {
+        setBookings((bookingsRes.data?.bookings || bookingsRes.data || []).map(adaptBooking));
+      }
+    } catch {
+      setStatsError(true);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProfileData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Edit profile ──
   const [showEditSheet, setShowEditSheet] = useState(false);
@@ -134,9 +166,10 @@ export default function Profile() {
     }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     toast.success("You have been logged out successfully");
+    navigate("/login");
   };
 
   return (
@@ -159,16 +192,16 @@ export default function Profile() {
               </div>
 
               <h2 className="font-poppins font-semibold text-xl text-white mb-1">
-                {user?.name || "Rajesh Kumar"}
+                {profileData?.name || "—"}
               </h2>
 
               <div className="flex items-center justify-center gap-1.5 mb-1">
                 <Phone className="w-3 h-3 text-white/50" />
-                <span className="text-xs text-white/50">{user?.phone || "+91 98765 43210"}</span>
+                <span className="text-xs text-white/50">{profileData?.phone || "Not provided"}</span>
               </div>
               <div className="flex items-center justify-center gap-1.5 mb-4">
                 <Mail className="w-3 h-3 text-white/50" />
-                <span className="text-xs text-white/50">{user?.email || "rajesh@example.com"}</span>
+                <span className="text-xs text-white/50">{profileData?.email || "Not provided"}</span>
               </div>
 
               <button
@@ -204,6 +237,20 @@ export default function Profile() {
           {/* Activity Highlights */}
           <div className="bg-white rounded-xl shadow-card p-5">
             <h4 className="font-poppins font-semibold text-sm text-neutral-700 mb-4">Account Info</h4>
+            {statsLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="h-10 skeleton-shimmer animate-shimmer rounded-lg" />
+                ))}
+              </div>
+            ) : statsError ? (
+              <div className="text-center py-3">
+                <p className="text-xs text-neutral-400 mb-2">Couldn't load account stats</p>
+                <button onClick={loadProfileData} className="text-xs font-semibold text-primary hover:underline">
+                  Retry
+                </button>
+              </div>
+            ) : (
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
@@ -211,7 +258,9 @@ export default function Profile() {
                 </div>
                 <div>
                   <p className="text-xs text-neutral-400">Member Since</p>
-                  <p className="text-sm font-semibold text-neutral-700">January 2024</p>
+                  <p className="text-sm font-semibold text-neutral-700">
+                    {profileData?.created_at || profileData?.createdAt ? formatDate(profileData.created_at || profileData.createdAt) : "—"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -221,7 +270,7 @@ export default function Profile() {
                 <div>
                   <p className="text-xs text-neutral-400">Active Shipments</p>
                   <p className="text-sm font-semibold text-neutral-700">
-                    {BOOKINGS.filter((b) => b.status === "In Transit" || b.status === "Assigned").length}
+                    {bookings.filter((b) => b.status === "In Transit" || b.status === "Assigned").length}
                   </p>
                 </div>
               </div>
@@ -235,6 +284,7 @@ export default function Profile() {
                 </div>
               </div>
             </div>
+            )}
           </div>
 
           <p className="text-center text-[10px] text-neutral-300">SSK Logistics v1.0.0 — GadiDost</p>
