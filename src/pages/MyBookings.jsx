@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, Check, Package, Download, XCircle, Truck, Copy, User, Building2,
-  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import StatusBadge from "../components/StatusBadge";
@@ -22,6 +22,8 @@ export default function MyBookings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [showPaymentSheet, setShowPaymentSheet] = useState(false);
+  const [showRateSheet, setShowRateSheet] = useState(false);
+  const [showDisputeSheet, setShowDisputeSheet] = useState(false);
   const toast = useToast();
   const { user } = useAuth();
   const token = getToken();
@@ -82,6 +84,34 @@ export default function MyBookings() {
     } catch (err) {
       toast.error(err?.message || "Failed to record payment");
     }
+  };
+
+  const handleRateSubmit = async ({ stars, review }) => {
+    if (!selectedBooking) return;
+    const res = await api.post(`/api/bookings/${selectedBooking.id}/rate`, { stars, review }, token);
+    if (!res?.success) throw new Error(res?.message || "Failed to submit rating");
+    const rating = res.data?.rating;
+    setBookings((current) => current.map((booking) => (
+      booking.id === selectedBooking.id ? { ...booking, rating } : booking
+    )));
+    setSelectedBooking((current) => (current ? { ...current, rating } : current));
+    setShowRateSheet(false);
+    toast.success("Thanks for rating your delivery!");
+  };
+
+  const handleDisputeSubmit = async ({ issueType, description }) => {
+    if (!selectedBooking) return;
+    const res = await api.post("/api/disputes", { booking_id: selectedBooking.id, issue_type: issueType, description }, token);
+    if (!res?.success) throw new Error(res?.message || "Failed to raise dispute");
+    setShowDisputeSheet(false);
+    toast.success("Dispute raised — our team will review it shortly.");
+  };
+
+  // A broker's counter-offer was accepted from the offers panel — the booking is now
+  // confirmed with that broker, so refresh the list and close the sheet.
+  const handleOfferAccepted = async () => {
+    await loadBookings();
+    setSelectedBooking(null);
   };
 
   return (
@@ -267,6 +297,9 @@ export default function MyBookings() {
             booking={selectedBooking}
             onCancel={() => handleCancel(selectedBooking.id)}
             onPayNow={() => setShowPaymentSheet(true)}
+            onRateNow={() => setShowRateSheet(true)}
+            onDisputeNow={() => setShowDisputeSheet(true)}
+            onOfferAccepted={handleOfferAccepted}
           />
         )}
       </BottomSheet>
@@ -279,6 +312,178 @@ export default function MyBookings() {
         onSuccess={handlePaySuccess}
         onPayLater={() => { setShowPaymentSheet(false); toast.info("You can pay anytime from My Bookings."); }}
       />
+
+      <BottomSheet isOpen={showRateSheet} onClose={() => setShowRateSheet(false)}>
+        {selectedBooking && (
+          <RateDeliverySheet booking={selectedBooking} onSubmit={handleRateSubmit} onCancel={() => setShowRateSheet(false)} />
+        )}
+      </BottomSheet>
+
+      <BottomSheet isOpen={showDisputeSheet} onClose={() => setShowDisputeSheet(false)}>
+        {selectedBooking && (
+          <RaiseDisputeSheet booking={selectedBooking} onSubmit={handleDisputeSubmit} onCancel={() => setShowDisputeSheet(false)} />
+        )}
+      </BottomSheet>
+    </div>
+  );
+}
+
+const ISSUE_TYPES = [
+  { value: "damaged_goods", label: "Damaged Goods" },
+  { value: "payment_delay", label: "Payment Delay" },
+  { value: "cancellation_fee", label: "Cancellation Fee" },
+  { value: "route_dispute", label: "Route Dispute" },
+  { value: "late_delivery", label: "Late Delivery" },
+  { value: "fuel_surcharge", label: "Fuel Surcharge" },
+  { value: "wrong_items", label: "Wrong Items" },
+  { value: "weight_discrepancy", label: "Weight Discrepancy" },
+];
+
+function RaiseDisputeSheet({ booking, onSubmit, onCancel }) {
+  const toast = useToast();
+  const [issueType, setIssueType] = useState("");
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!issueType) {
+      toast.error("Please select an issue type");
+      return;
+    }
+    if (!description.trim()) {
+      toast.error("Please describe the issue");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit({ issueType, description: description.trim() });
+    } catch (err) {
+      toast.error(err?.message || "Failed to raise dispute");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Report a Problem</h3>
+      <p className="text-sm text-neutral-400 mb-5">
+        {booking.pickup} → {booking.drop}
+      </p>
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Issue Type</label>
+      <select
+        value={issueType}
+        onChange={(e) => setIssueType(e.target.value)}
+        className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-4"
+      >
+        <option value="">Select an issue...</option>
+        {ISSUE_TYPES.map((item) => (
+          <option key={item.value} value={item.value}>{item.label}</option>
+        ))}
+      </select>
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Description</label>
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Describe what went wrong..."
+        maxLength={2000}
+        rows={4}
+        className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-5"
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onCancel}
+          className="flex-1 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-danger text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {submitting ? "Submitting..." : "Submit Dispute"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RateDeliverySheet({ booking, onSubmit, onCancel }) {
+  const toast = useToast();
+  const [stars, setStars] = useState(0);
+  const [hoverStars, setHoverStars] = useState(0);
+  const [review, setReview] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!stars) {
+      toast.error("Please select a star rating");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit({ stars, review: review.trim() || undefined });
+    } catch (err) {
+      toast.error(err?.message || "Failed to submit rating");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Rate this delivery</h3>
+      <p className="text-sm text-neutral-400 mb-5">
+        {booking.pickup} → {booking.drop}
+      </p>
+
+      <div className="flex items-center justify-center gap-2 mb-5">
+        {[1, 2, 3, 4, 5].map((value) => {
+          const filled = value <= (hoverStars || stars);
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setStars(value)}
+              onMouseEnter={() => setHoverStars(value)}
+              onMouseLeave={() => setHoverStars(0)}
+              className="p-1"
+              aria-label={`${value} star${value > 1 ? "s" : ""}`}
+            >
+              <Star className={`w-9 h-9 transition-colors ${filled ? "fill-warning text-warning" : "text-neutral-200"}`} />
+            </button>
+          );
+        })}
+      </div>
+
+      <textarea
+        value={review}
+        onChange={(e) => setReview(e.target.value)}
+        placeholder="Tell us about your experience (optional)"
+        maxLength={1000}
+        rows={4}
+        className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-5"
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onCancel}
+          className="flex-1 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-50"
+        >
+          {submitting ? "Submitting..." : "Submit Rating"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -304,13 +509,211 @@ function InfoTile({ icon: Icon, label, name, sub, tint = "primary" }) {
   );
 }
 
-function BookingDetailSheet({ booking, onCancel, onPayNow }) {
+// Negotiation panel — one entry per broker who received this booking's job request. A broker's
+// turn is 'pending' (nothing for the client to do yet); once they counter, status flips to
+// 'countered' and the client can accept/reject/counter back. Polled every few seconds while the
+// sheet is open since offers arrive in near real time, not on a client action.
+const OFFERS_POLL_INTERVAL_MS = 6000;
+
+function OffersPanel({ booking, onAccepted }) {
+  const toast = useToast();
+  const token = getToken();
+  const [offers, setOffers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [counterFor, setCounterFor] = useState(null);
+  const [counterAmount, setCounterAmount] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const load = async () => {
+    try {
+      const res = await api.get(`/api/bookings/${booking.id}/offers`, token);
+      if (res?.success) setOffers(res.data?.offers || []);
+    } catch { /* silent — next poll retries */ } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, OFFERS_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id]);
+
+  const handleAccept = async (offerId) => {
+    setBusyId(offerId);
+    try {
+      const res = await api.patch(`/api/jobs/requests/${offerId}/client-accept`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to accept offer");
+      toast.success("Offer accepted — booking confirmed!");
+      await onAccepted?.();
+    } catch (err) {
+      toast.error(err?.message || "Failed to accept offer");
+      setBusyId(null);
+    }
+  };
+
+  const handleReject = async (offerId) => {
+    setBusyId(offerId);
+    try {
+      const res = await api.patch(`/api/jobs/requests/${offerId}/client-reject`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to decline offer");
+      setOffers((current) => current.map((o) => (o.id === offerId ? { ...o, status: "declined" } : o)));
+      toast.info("Offer declined");
+    } catch (err) {
+      toast.error(err?.message || "Failed to decline offer");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const submitCounter = async () => {
+    if (!counterFor) return;
+    const amount = Number(counterAmount);
+    if (!amount || amount <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    setBusyId(counterFor.id);
+    try {
+      const res = await api.patch(`/api/jobs/requests/${counterFor.id}/client-counter`, { amount }, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to send counter-offer");
+      const updated = res.data?.request;
+      setOffers((current) => current.map((o) => (o.id === counterFor.id ? { ...o, amount: updated?.amount ?? amount, status: updated?.status ?? "pending", offerHistory: updated?.offerHistory ?? o.offerHistory } : o)));
+      toast.success("Counter-offer sent");
+      setCounterFor(null);
+    } catch (err) {
+      toast.error(err?.message || "Failed to send counter-offer");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const activeOffers = offers.filter((o) => !["declined", "expired"].includes(o.status));
+  if (!loading && activeOffers.length === 0) return null;
+
+  return (
+    <div className="bg-neutral-50 rounded-lg p-3 mb-4">
+      <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+        <Handshake className="w-3.5 h-3.5" /> Broker Offers
+      </p>
+
+      {loading ? (
+        <p className="text-xs text-neutral-400 py-2">Loading offers...</p>
+      ) : (
+        <div className="space-y-2">
+          {activeOffers.map((offer) => (
+            <div key={offer.id} className="bg-white rounded-lg p-3 border border-neutral-100">
+              <div className="flex items-center justify-between mb-1.5 gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-neutral-700 truncate">{offer.brokerName || "Broker"}</p>
+                  {offer.brokerPhone && <p className="text-[11px] text-neutral-400">{offer.brokerPhone}</p>}
+                </div>
+                <p className="font-poppins font-bold text-primary whitespace-nowrap">₹{Number(offer.amount || 0).toLocaleString("en-IN")}</p>
+              </div>
+
+              {offer.status === "countered" ? (
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => handleAccept(offer.id)}
+                    disabled={busyId === offer.id}
+                    className="flex-1 py-1.5 text-xs font-semibold bg-success text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => { setCounterFor(offer); setCounterAmount(String(offer.amount || "")); }}
+                    disabled={busyId === offer.id}
+                    className="flex-1 py-1.5 text-xs font-semibold border border-primary/30 text-primary rounded-md hover:bg-primary-50 transition-colors disabled:opacity-50"
+                  >
+                    Counter
+                  </button>
+                  <button
+                    onClick={() => handleReject(offer.id)}
+                    disabled={busyId === offer.id}
+                    className="flex-1 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-neutral-400 mt-1">Waiting for broker's response...</p>
+              )}
+
+              {counterFor?.id === offer.id && (
+                <div className="mt-2.5 pt-2.5 border-t border-neutral-100">
+                  <p className="text-[11px] font-semibold text-neutral-500 mb-1.5">Your counter-offer</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={counterAmount}
+                      onChange={(e) => setCounterAmount(e.target.value)}
+                      className="flex-1 rounded-md border border-neutral-200 px-2.5 py-1.5 text-sm text-neutral-700 outline-none focus:border-primary min-w-0"
+                    />
+                    <button
+                      onClick={submitCounter}
+                      disabled={busyId === offer.id}
+                      className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-md hover:bg-primary-dark transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      Send
+                    </button>
+                    <button
+                      onClick={() => setCounterFor(null)}
+                      className="px-3 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {offer.offerHistory?.length > 1 && (
+                <details className="mt-2">
+                  <summary className="text-[11px] text-neutral-400 cursor-pointer select-none">Negotiation history ({offer.offerHistory.length})</summary>
+                  <div className="mt-1.5 space-y-1">
+                    {offer.offerHistory.map((entry, i) => (
+                      <p key={i} className="text-[11px] text-neutral-400">
+                        {entry.by === "client" ? "You" : "Broker"} offered <span className="font-medium text-neutral-600">₹{Number(entry.amount || 0).toLocaleString("en-IN")}</span>
+                      </p>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeNow, onOfferAccepted }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [cancelling, setCancelling] = useState(false);
+  const [loadingPod, setLoadingPod] = useState(false);
+  // Report a Problem — available for any active or recently-completed booking; not
+  // useful for one that's only just been requested (nothing has happened yet) or cancelled.
+  const isDisputable = !["Requested", "Cancelled"].includes(booking.status);
+
+  const viewProofOfDelivery = async () => {
+    if (!booking.podUrl || loadingPod) return;
+    setLoadingPod(true);
+    try {
+      const blobUrl = await api.getFileBlobUrl(booking.podUrl, getToken());
+      window.open(blobUrl, "_blank");
+    } catch (err) {
+      toast.error(err?.message || "Failed to load proof of delivery");
+    } finally {
+      setLoadingPod(false);
+    }
+  };
   const isLive = LIVE_STATUSES.includes(booking.status);
   const isCancellable = booking.status === "Requested";
   const isPayable = booking.paymentStatus === "Pending" && booking.status !== "Cancelled";
+  // Client Rating — offered once a delivery is done and not yet rated.
+  const isRatable = ["Delivered", "Completed"].includes(booking.status) && !booking.rating;
 
   const copyId = () => {
     navigator.clipboard?.writeText(bookingRef(booking));
@@ -412,6 +815,11 @@ function BookingDetailSheet({ booking, onCancel, onPayNow }) {
         )}
       </div>
 
+      {/* Broker Offers — negotiation is only live while the booking is still awaiting a broker */}
+      {booking.status === "Requested" && (
+        <OffersPanel booking={booking} onAccepted={onOfferAccepted} />
+      )}
+
       {/* Info Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <InfoTile icon={User} label="Client" name={booking.clientName || "You"} tint="primary" />
@@ -469,8 +877,49 @@ function BookingDetailSheet({ booking, onCancel, onPayNow }) {
         </div>
       </div>
 
+      {/* Proof of Delivery */}
+      {booking.podUrl && (
+        <button
+          onClick={viewProofOfDelivery}
+          disabled={loadingPod}
+          className="w-full flex items-center gap-2.5 bg-neutral-50 rounded-lg p-3 mb-4 hover:bg-neutral-100 transition-colors disabled:opacity-60"
+        >
+          <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary flex items-center justify-center flex-shrink-0">
+            <Camera className="w-4 h-4" />
+          </div>
+          <span className="text-sm font-medium text-neutral-700">{loadingPod ? "Loading..." : "View Proof of Delivery"}</span>
+        </button>
+      )}
+
+      {/* Client Rating */}
+      {booking.rating && (
+        <div className="bg-neutral-50 rounded-lg p-3 mb-4">
+          <p className="text-[10px] text-neutral-400 mb-1.5">Your Rating</p>
+          <div className="flex items-center gap-0.5 mb-1">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <Star
+                key={value}
+                className={`w-4 h-4 ${value <= booking.rating.stars ? "fill-warning text-warning" : "text-neutral-200"}`}
+              />
+            ))}
+          </div>
+          {booking.rating.review && (
+            <p className="text-sm text-neutral-600">{booking.rating.review}</p>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-wrap gap-3">
+        {isRatable && (
+          <button
+            onClick={onRateNow}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-warning text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            <Star className="w-4 h-4" />
+            Rate this Delivery
+          </button>
+        )}
         {isPayable && (
           <button
             onClick={onPayNow}
@@ -493,6 +942,15 @@ function BookingDetailSheet({ booking, onCancel, onPayNow }) {
           <Download className="w-4 h-4" />
           Download Invoice
         </button>
+        {isDisputable && (
+          <button
+            onClick={onDisputeNow}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Report a Problem
+          </button>
+        )}
         {isCancellable && (
           <button
             onClick={handleCancelClick}

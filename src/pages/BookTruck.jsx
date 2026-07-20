@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Building2, Route, ArrowUpDown, Star, Check, Truck,
-  ArrowRight, MapPin, Package, Weight, Hash, ClipboardList,
+  ArrowRight, MapPin, Package, Weight, Hash, ClipboardList, Tag,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PaymentSheet from "../components/PaymentSheet";
@@ -11,15 +11,16 @@ import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { bookingRef } from "../utils";
 
-const TRUCK_BASE_FARES = { small: 500, medium: 800, large: 1200, part: 300 };
-
+// Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
+// ever shown when the live, admin-configured pricing couldn't be fetched at all (see
+// configError below), never used to override a real response.
 const FALLBACK_CITIES = ["Mumbai", "Pune", "Delhi", "Bengaluru", "Chennai", "Hyderabad", "Kolkata", "Ahmedabad"];
 const FALLBACK_MATERIALS = ["Electronics", "Furniture", "Textiles", "Machinery", "Food & Groceries", "Construction Material", "Chemicals", "General Cargo"];
 const FALLBACK_TRUCKS = [
-  { id: "small", name: "Small Truck", capacity: "Up to 1 Ton" },
-  { id: "medium", name: "Medium Truck", capacity: "1 - 5 Tons" },
-  { id: "large", name: "Large Truck", capacity: "5 - 15 Tons" },
-  { id: "part", name: "Part Load", capacity: "Shared Space" },
+  { id: "small", name: "Small Truck", capacity: "Up to 1 Ton", basePrice: 500 },
+  { id: "medium", name: "Medium Truck", capacity: "1 - 5 Tons", basePrice: 800 },
+  { id: "large", name: "Large Truck", capacity: "5 - 15 Tons", basePrice: 1200 },
+  { id: "part", name: "Part Load", capacity: "Shared Space", basePrice: null },
 ];
 
 
@@ -31,11 +32,16 @@ export default function BookTruck() {
   const [step, setStep] = useState(1);
   const [cities, setCities] = useState(FALLBACK_CITIES);
   const [materialTypes, setMaterialTypes] = useState(FALLBACK_MATERIALS);
-  const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS.map((t) => ({ ...t, basePrice: TRUCK_BASE_FARES[t.id] || 0 })));
+  const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS);
   const [configError, setConfigError] = useState(false);
   const [priceBreakdown, setPriceBreakdown] = useState(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Negotiation — instead of the system-calculated price, the client can propose their own
+  // starting ask. Brokers still see this as the opening offer and can counter it (see JobRequests
+  // on the broker side, and the offers panel on My Bookings for the back-and-forth).
+  const [proposeOwnPrice, setProposeOwnPrice] = useState(false);
+  const [customAmount, setCustomAmount] = useState("");
   const [form, setForm] = useState({
     transportType: null,
     pickup: "",
@@ -64,10 +70,9 @@ export default function BookTruck() {
       if (citiesRes?.data?.cities?.length) setCities(citiesRes.data.cities);
       if (materialsRes?.data?.materialTypes?.length) setMaterialTypes(materialsRes.data.materialTypes);
       if (vehiclesRes?.data?.vehicleTypes?.length) {
-        setTruckOptions(vehiclesRes.data.vehicleTypes.map((truck) => ({
-          ...truck,
-          basePrice: TRUCK_BASE_FARES[truck.id] || 0,
-        })));
+        // basePrice comes straight from the backend (live pricing_config, set in admin's
+        // Pricing Management) — never overridden with a local constant here.
+        setTruckOptions(vehiclesRes.data.vehicleTypes);
       }
     };
 
@@ -112,9 +117,17 @@ export default function BookTruck() {
     };
   }, [form.truckType, form.pickup, form.drop, form.transportType, token]);
 
+  // Client's chosen ask: either the system-calculated price, or their own proposed price —
+  // whichever is active drives what brokers see as the opening offer.
+  const finalAmount = proposeOwnPrice && Number(customAmount) > 0 ? Number(customAmount) : priceBreakdown?.total;
+
   const handleConfirm = () => {
     if (!priceBreakdown?.total) {
       toast.error("Price quote isn't ready yet — please wait a moment and try again.");
+      return;
+    }
+    if (proposeOwnPrice && !(Number(customAmount) > 0)) {
+      toast.error("Enter the price you'd like to propose, or switch back to the system price.");
       return;
     }
     setShowPaymentSheet(true);
@@ -141,7 +154,7 @@ export default function BookTruck() {
         weight: form.weight,
         quantity: form.quantity,
         material: form.materialType,
-        amount: priceBreakdown.total,
+        amount: finalAmount,
         distance: priceBreakdown.distance,
         payment_status: paymentStatus,
       }, token);
@@ -508,10 +521,14 @@ export default function BookTruck() {
                             {truckOpt.featured && <Star className="w-3.5 h-3.5 text-warning fill-warning flex-shrink-0" />}
                           </div>
                           <p className="text-xs text-neutral-400">{truckOpt.capacity}</p>
-                          <p className="font-poppins font-bold text-base text-primary mt-2">
-                            ₹{truckOpt.basePrice.toLocaleString("en-IN")}
-                            <span className="text-xs font-normal text-neutral-400 ml-1">base</span>
-                          </p>
+                          {truckOpt.basePrice != null ? (
+                            <p className="font-poppins font-bold text-base text-primary mt-2">
+                              ₹{truckOpt.basePrice.toLocaleString("en-IN")}
+                              <span className="text-xs font-normal text-neutral-400 ml-1">base</span>
+                            </p>
+                          ) : (
+                            <p className="font-poppins font-semibold text-sm text-primary mt-2">Billed by capacity used</p>
+                          )}
                         </div>
                         <div
                           className={`absolute top-4 right-4 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
@@ -675,11 +692,43 @@ export default function BookTruck() {
                       </div>
                     ) : priceBreakdown?.total ? (
                       <div>
-                        <p className="font-poppins font-bold text-2xl text-primary">
+                        <p className={`font-poppins font-bold text-2xl ${proposeOwnPrice ? "text-neutral-300 line-through" : "text-primary"}`}>
                           ₹{Number(priceBreakdown.total).toLocaleString("en-IN")}
                         </p>
                         {!!priceBreakdown.distance && (
                           <p className="text-[11px] text-neutral-300 mt-0.5">~{priceBreakdown.distance} km</p>
+                        )}
+
+                        <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={proposeOwnPrice}
+                            onChange={(e) => {
+                              setProposeOwnPrice(e.target.checked);
+                              if (!e.target.checked) setCustomAmount("");
+                            }}
+                            className="w-3.5 h-3.5 rounded border-neutral-300 text-primary focus:ring-primary/20"
+                          />
+                          <span className="text-xs font-medium text-neutral-500 flex items-center gap-1">
+                            <Tag className="w-3 h-3" /> Propose your own price
+                          </span>
+                        </label>
+
+                        {proposeOwnPrice && (
+                          <div className="mt-2">
+                            <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-2.5 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
+                              <span className="text-neutral-400 text-sm mr-1">₹</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={customAmount}
+                                onChange={(e) => setCustomAmount(e.target.value)}
+                                placeholder={`e.g. ${Math.round(priceBreakdown.total)}`}
+                                className="flex-1 bg-transparent text-sm font-semibold text-neutral-800 outline-none placeholder:text-neutral-300 placeholder:font-normal min-w-0"
+                              />
+                            </div>
+                            <p className="text-[11px] text-neutral-300 mt-1.5">Brokers will see this as your opening offer and can counter it.</p>
+                          </div>
                         )}
                       </div>
                     ) : (
@@ -695,7 +744,7 @@ export default function BookTruck() {
 
       <PaymentSheet
         open={showPaymentSheet}
-        amount={priceBreakdown?.total}
+        amount={finalAmount}
         phone={user?.phone}
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaymentSuccess}

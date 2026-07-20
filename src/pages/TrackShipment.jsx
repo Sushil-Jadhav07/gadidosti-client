@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock, AlertTriangle } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock, AlertTriangle, MessageCircle } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
+import BottomSheet from "../components/BottomSheet";
+import ChatWindow from "../components/ChatWindow";
+import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
 
@@ -13,13 +16,22 @@ const INCIDENT_REASON_LABELS = {
   other: "an issue",
 };
 
+const MECHANIC_STATUS_LABELS = {
+  requested: "We're arranging a mechanic now.",
+  mechanic_assigned: "A mechanic has been arranged and is on the way.",
+  in_progress: "The mechanic is working on the vehicle.",
+  resolved: "The issue has been resolved.",
+};
+
 export default function TrackShipment() {
+  const { user } = useAuth();
   const [searchId, setSearchId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeBooking, setActiveBooking] = useState(null);
   const [incident, setIncident] = useState(null);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showChat, setShowChat] = useState(false);
   const [noBookingsYet, setNoBookingsYet] = useState(false);
   const token = getToken();
 
@@ -130,7 +142,11 @@ export default function TrackShipment() {
                 <p className="text-sm font-semibold text-neutral-800">
                   Your driver reported {INCIDENT_REASON_LABELS[incident.reason] || "an issue"} and support has been notified.
                 </p>
-                <p className="text-xs text-neutral-500 mt-0.5">We're arranging a solution and will keep you updated.</p>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  {incident.reason === "breakdown" && incident.mechanicStatus
+                    ? MECHANIC_STATUS_LABELS[incident.mechanicStatus] || "We're arranging a solution and will keep you updated."
+                    : "We're arranging a solution and will keep you updated."}
+                </p>
               </div>
             </div>
           )}
@@ -152,7 +168,16 @@ export default function TrackShipment() {
                     </span>
                   </div>
                 </div>
-                <StatusBadge status={activeBooking.status} />
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => setShowChat(true)}
+                    className="w-8 h-8 rounded-lg bg-primary-50 text-primary flex items-center justify-center hover:bg-primary/15 transition-colors"
+                    title="Chat"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </button>
+                  <StatusBadge status={activeBooking.status} />
+                </div>
               </div>
 
               {/* Truck Info */}
@@ -392,6 +417,15 @@ export default function TrackShipment() {
           </p>
         </div>
       )}
+
+      <BottomSheet isOpen={showChat} onClose={() => setShowChat(false)}>
+        {activeBooking && (
+          <div>
+            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-3">Chat &mdash; {bookingRef(activeBooking)}</h3>
+            <ChatWindow bookingId={activeBooking.id} currentUserId={user?.id} />
+          </div>
+        )}
+      </BottomSheet>
     </div>
   );
 }
