@@ -3,6 +3,7 @@ import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock, AlertTriangle, 
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
+import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
@@ -23,12 +24,25 @@ const MECHANIC_STATUS_LABELS = {
   resolved: "The issue has been resolved.",
 };
 
+// Statuses where the driver is actually en route and worth polling live position for —
+// matches formatBookingStatus's labels (adaptBooking already converts the raw enum).
+const LIVE_TRACKING_LABELS = ["Assigned", "En Route", "Picked Up", "In Transit"];
+const TRACK_POLL_MS = 7000;
+
+const formatEta = (minutes) => {
+  if (minutes == null) return "Calculating...";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}min` : `${m}min`;
+};
+
 export default function TrackShipment() {
   const { user } = useAuth();
   const [searchId, setSearchId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeBooking, setActiveBooking] = useState(null);
   const [incident, setIncident] = useState(null);
+  const [tracking, setTracking] = useState(null);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(false);
@@ -56,26 +70,37 @@ export default function TrackShipment() {
     loadLatest();
   }, [token]);
 
-  // Booking list/search responses don't carry incident data — that only comes back from
-  // the dedicated tracking endpoint, so it's fetched separately once we know which booking
-  // is being shown.
+  // Booking list/search responses don't carry incident or live-location data — both only
+  // come back from the dedicated tracking endpoint, polled every few seconds while the
+  // shipment is actually en route (per the backend's own polling comment on that route).
   useEffect(() => {
     if (!activeBooking?.id) {
       setIncident(null);
+      setTracking(null);
       return;
     }
     let cancelled = false;
-    const loadIncident = async () => {
+    const poll = async () => {
       try {
         const response = await api.get(`/api/bookings/${activeBooking.id}/track`, token);
-        if (!cancelled) setIncident(response?.data?.incident || null);
+        if (cancelled) return;
+        const data = response?.data || {};
+        setIncident(data.incident || null);
+        setTracking({
+          driverLat: data.driverLat,
+          driverLng: data.driverLng,
+          etaMinutes: data.etaMinutes,
+          distanceRemainingKm: data.distanceRemainingKm,
+        });
       } catch {
         if (!cancelled) setIncident(null);
       }
     };
-    loadIncident();
-    return () => { cancelled = true; };
-  }, [activeBooking?.id, token]);
+
+    poll();
+    const interval = LIVE_TRACKING_LABELS.includes(activeBooking.status) ? setInterval(poll, TRACK_POLL_MS) : null;
+    return () => { cancelled = true; if (interval) clearInterval(interval); };
+  }, [activeBooking?.id, activeBooking?.status, token]);
 
   const handleSearch = async () => {
     if (!searchId.trim()) return;
@@ -296,106 +321,53 @@ export default function TrackShipment() {
           {/* Map Panel */}
           <div className="lg:col-span-3">
             <div className="bg-white rounded-xl shadow-card overflow-hidden h-full min-h-[300px] md:min-h-[400px] lg:min-h-[500px] relative">
-              {/* Map Grid Background */}
-              <div className="absolute inset-0 bg-[#F0F4F8]">
-                <svg width="100%" height="100%">
-                  <defs>
-                    <pattern id="mapgrid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-                      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#CBD5E1" strokeWidth="0.6" />
-                    </pattern>
-                    <pattern id="bigGrid" x="0" y="0" width="200" height="200" patternUnits="userSpaceOnUse">
-                      <path d="M 200 0 L 0 0 0 200" fill="none" stroke="#B8C5D6" strokeWidth="1" />
-                    </pattern>
-                  </defs>
-                  <rect width="100%" height="100%" fill="url(#mapgrid)" />
-                  <rect width="100%" height="100%" fill="url(#bigGrid)" />
-                  {/* Road lines */}
-                  <line x1="0" y1="45%" x2="100%" y2="45%" stroke="#DDE4ED" strokeWidth="8" />
-                  <line x1="0" y1="70%" x2="100%" y2="70%" stroke="#DDE4ED" strokeWidth="5" />
-                  <line x1="30%" y1="0" x2="30%" y2="100%" stroke="#DDE4ED" strokeWidth="5" />
-                  <line x1="65%" y1="0" x2="65%" y2="100%" stroke="#DDE4ED" strokeWidth="8" />
-                  <line x1="15%" y1="0" x2="15%" y2="100%" stroke="#DDE4ED" strokeWidth="3" />
-                  <line x1="80%" y1="0" x2="80%" y2="100%" stroke="#DDE4ED" strokeWidth="3" />
-                  <line x1="0" y1="25%" x2="100%" y2="25%" stroke="#DDE4ED" strokeWidth="3" />
-                  <line x1="0" y1="80%" x2="100%" y2="80%" stroke="#DDE4ED" strokeWidth="3" />
-                </svg>
-              </div>
+              <MapView
+                routes={[{
+                  id: activeBooking.id,
+                  origin: activeBooking.pickupLat != null && activeBooking.pickupLng != null
+                    ? { lat: Number(activeBooking.pickupLat), lng: Number(activeBooking.pickupLng) }
+                    : activeBooking.pickup,
+                  destination: activeBooking.dropLat != null && activeBooking.dropLng != null
+                    ? { lat: Number(activeBooking.dropLat), lng: Number(activeBooking.dropLng) }
+                    : activeBooking.drop,
+                  originLabel: activeBooking.pickup,
+                  destinationLabel: activeBooking.drop,
+                }]}
+                markers={tracking?.driverLat != null && tracking?.driverLng != null ? [{
+                  id: "truck",
+                  position: { lat: Number(tracking.driverLat), lng: Number(tracking.driverLng) },
+                  color: "red",
+                  title: "Your truck",
+                }] : []}
+                height="100%"
+                className="absolute inset-0"
+              />
 
               {/* Live chip */}
-              <div className="absolute top-4 left-4 z-10 bg-success text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-md">
+              <div className="absolute top-4 left-4 z-10 bg-success text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-md pointer-events-none">
                 <span className="w-2 h-2 rounded-full bg-white animate-green-pulse" />
                 Live Tracking
               </div>
 
               {/* Booking ID chip */}
-              <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-card">
+              <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-card pointer-events-none">
                 <p className="text-[11px] text-neutral-400">Tracking</p>
                 <p className="text-xs font-semibold text-neutral-700">{bookingRef(activeBooking)}</p>
               </div>
 
-              {/* Pickup Pin */}
-              <div className="absolute top-[35%] left-[20%] z-10">
-                <div className="flex flex-col items-center">
-                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shadow-glow-blue">
-                    <MapPin className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <div className="bg-white text-[10px] font-semibold text-neutral-700 px-2 py-0.5 rounded shadow-card mt-1 whitespace-nowrap">
-                    {activeBooking.pickup}
-                  </div>
-                </div>
-              </div>
-
-              {/* Drop Pin */}
-              <div className="absolute top-[50%] right-[20%] z-10">
-                <div className="flex flex-col items-center">
-                  <div className="w-6 h-6 rounded-full bg-success flex items-center justify-center shadow-glow-green">
-                    <MapPin className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <div className="bg-white text-[10px] font-semibold text-neutral-700 px-2 py-0.5 rounded shadow-card mt-1 whitespace-nowrap">
-                    {activeBooking.drop}
-                  </div>
-                </div>
-              </div>
-
-              {/* Dashed route line */}
-              <svg className="absolute inset-0 w-full h-full z-[5] pointer-events-none" preserveAspectRatio="none">
-                <line
-                  x1="22%"
-                  y1="38%"
-                  x2="78%"
-                  y2="52%"
-                  stroke="#1976FF"
-                  strokeWidth="2"
-                  strokeDasharray="6 4"
-                  opacity="0.5"
-                />
-              </svg>
-
-              {/* Animated Truck Pin — midpoint */}
-              <div className="absolute top-[42%] left-[50%] -translate-x-1/2 -translate-y-full z-20">
-                <div className="animate-float">
-                  <div className="relative">
-                    <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center shadow-glow-blue border-2 border-white">
-                      <Truck className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-primary" />
-                  </div>
-                </div>
-              </div>
-
               {/* ETA Chip */}
-              <div className="absolute bottom-5 right-5 z-10 bg-white rounded-xl px-4 md:px-5 py-3 shadow-card flex items-center gap-3">
+              <div className="absolute bottom-5 right-5 z-10 bg-white rounded-xl px-4 md:px-5 py-3 shadow-card flex items-center gap-3 pointer-events-none">
                 <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
                   <Clock className="w-5 h-5 text-primary" />
                 </div>
                 <div>
                   <p className="text-[10px] text-neutral-400">Estimated Arrival</p>
-                  <p className="font-poppins font-bold text-base text-neutral-800">2h 45min</p>
+                  <p className="font-poppins font-bold text-base text-neutral-800">{formatEta(tracking?.etaMinutes)}</p>
                 </div>
               </div>
 
               {/* Material info chip */}
-              <div className="absolute bottom-5 left-5 z-10 bg-white/95 rounded-lg px-3 py-2 shadow-card">
+              <div className="absolute bottom-5 left-5 z-10 bg-white/95 rounded-lg px-3 py-2 shadow-card pointer-events-none">
                 <p className="text-[10px] text-neutral-400 mb-0.5">Cargo</p>
                 <p className="text-xs font-semibold text-neutral-700">{activeBooking.material}</p>
                 <p className="text-[10px] text-neutral-400">{activeBooking.weight} {activeBooking.weightUnit}</p>

@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Building2, Route, ArrowUpDown, Star, Check, Truck,
-  ArrowRight, MapPin, Package, Weight, Hash, ClipboardList, Tag,
+  ArrowRight, MapPin, Package, Weight, Hash, ClipboardList, Tag, Zap,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PaymentSheet from "../components/PaymentSheet";
+import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
@@ -36,6 +37,14 @@ export default function BookTruck() {
   const [configError, setConfigError] = useState(false);
   const [priceBreakdown, setPriceBreakdown] = useState(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
+  const [quoteError, setQuoteError] = useState(false);
+  // Bumped by the Retry button to force the price effect to run again without requiring the
+  // user to re-touch a field — included in that effect's dependency array below.
+  const [quoteRetryToken, setQuoteRetryToken] = useState(0);
+  // Identifies the most recent price-fetch attempt so a slow/superseded older request can
+  // never clobber a newer one's result — or worse, leave loadingQuote stuck true forever if
+  // it resolves after being superseded (see the effect below for how this is used).
+  const quoteRequestId = useRef(0);
   const [confirming, setConfirming] = useState(false);
   // Negotiation — instead of the system-calculated price, the client can propose their own
   // starting ask. Brokers still see this as the opening offer and can counter it (see JobRequests
@@ -45,7 +54,11 @@ export default function BookTruck() {
   const [form, setForm] = useState({
     transportType: null,
     pickup: "",
+    pickupLat: null,
+    pickupLng: null,
     drop: "",
+    dropLat: null,
+    dropLng: null,
     weight: 1,
     quantity: 1,
     materialType: "",
@@ -86,36 +99,57 @@ export default function BookTruck() {
   useEffect(() => {
     if (!form.truckType || !form.pickup || !form.drop || !form.transportType) {
       setPriceBreakdown(null);
+      setQuoteError(false);
       return;
     }
 
-    let cancelled = false;
+    // A fresh id for this attempt — every state update below checks it's still the latest
+    // before applying, so a slow/superseded request can never clobber a newer result or
+    // (worse) leave loadingQuote stuck true forever after being superseded mid-flight.
+    const requestId = ++quoteRequestId.current;
+    const isCurrent = () => requestId === quoteRequestId.current;
+
     const timer = setTimeout(async () => {
+      if (!isCurrent()) return;
       setLoadingQuote(true);
+      setQuoteError(false);
       try {
         const distanceRes = await api.post("/api/config/distance", { pickup: form.pickup, drop: form.drop });
-        const distance = distanceRes?.data?.distance || 0;
+        if (!distanceRes?.success) throw new Error(distanceRes?.message || "Distance unavailable");
+        const distance = distanceRes.data?.distance || 0;
+        // Traffic-aware pricing: feeding these through is what makes the estimate's
+        // trafficMultiplier/trafficSurcharge actually reflect live traffic instead of
+        // defaulting to "no surge" (see PricingModel.estimate).
+        const durationMin = distanceRes.data?.durationMin;
+        const durationInTrafficMin = distanceRes.data?.durationInTrafficMin;
         const pricingRes = await api.post("/api/pricing/estimate", {
           truck_category: form.truckType,
           transport_type: form.transportType,
           distance,
+          duration_min: durationMin,
+          duration_in_traffic_min: durationInTrafficMin,
         }, token);
-        if (!cancelled) {
-          const pricing = pricingRes?.data?.pricing || pricingRes?.data || {};
-          setPriceBreakdown({ ...pricing, distance });
+        if (!pricingRes?.success) throw new Error(pricingRes?.message || "Pricing unavailable");
+        if (isCurrent()) {
+          const pricing = pricingRes.data?.pricing || pricingRes.data || {};
+          // Carried through to submitBooking so the booking actually created stores the
+          // same traffic-adjusted breakdown the client was quoted, not a fresh no-surge one.
+          setPriceBreakdown({ ...pricing, distance, durationMin, durationInTrafficMin });
         }
       } catch {
-        if (!cancelled) setPriceBreakdown(null);
+        if (isCurrent()) {
+          setPriceBreakdown(null);
+          setQuoteError(true);
+        }
       } finally {
-        if (!cancelled) setLoadingQuote(false);
+        if (isCurrent()) setLoadingQuote(false);
       }
     }, 450);
 
     return () => {
-      cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.truckType, form.pickup, form.drop, form.transportType, token]);
+  }, [form.truckType, form.pickup, form.drop, form.transportType, token, quoteRetryToken]);
 
   // Client's chosen ask: either the system-calculated price, or their own proposed price —
   // whichever is active drives what brokers see as the opening offer.
@@ -148,7 +182,11 @@ export default function BookTruck() {
     try {
       const response = await api.post("/api/bookings", {
         pickup_location: form.pickup,
+        pickup_lat: form.pickupLat,
+        pickup_lng: form.pickupLng,
         drop_location: form.drop,
+        drop_lat: form.dropLat,
+        drop_lng: form.dropLng,
         truck_category: form.truckType,
         transport_type: form.transportType,
         weight: form.weight,
@@ -156,6 +194,8 @@ export default function BookTruck() {
         material: form.materialType,
         amount: finalAmount,
         distance: priceBreakdown.distance,
+        duration_min: priceBreakdown.durationMin,
+        duration_in_traffic_min: priceBreakdown.durationInTrafficMin,
         payment_status: paymentStatus,
       }, token);
 
@@ -301,12 +341,20 @@ export default function BookTruck() {
                       </label>
                       <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
                         <MapPin className="w-4 h-4 text-neutral-300 mr-2 flex-shrink-0" />
-                        <input
-                          type="text"
+                        <PlacesAutocompleteInput
                           value={form.pickup}
-                          onChange={(e) => updateForm("pickup", e.target.value)}
-                          onFocus={() => setFocusedField("pickup")}
-                          placeholder="Enter pickup city"
+                          onChange={(v) => {
+                            updateForm("pickup", v);
+                            updateForm("pickupLat", null);
+                            updateForm("pickupLng", null);
+                          }}
+                          onPlaceSelect={({ address, lat, lng }) => {
+                            updateForm("pickup", address);
+                            updateForm("pickupLat", lat);
+                            updateForm("pickupLng", lng);
+                          }}
+                          inputProps={{ onFocus: () => setFocusedField("pickup") }}
+                          placeholder="Enter pickup address or city"
                           className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                         />
                       </div>
@@ -314,9 +362,15 @@ export default function BookTruck() {
 
                     <button
                       onClick={() => {
-                        const temp = form.pickup;
-                        updateForm("pickup", form.drop);
-                        updateForm("drop", temp);
+                        setForm((prev) => ({
+                          ...prev,
+                          pickup: prev.drop,
+                          pickupLat: prev.dropLat,
+                          pickupLng: prev.dropLng,
+                          drop: prev.pickup,
+                          dropLat: prev.pickupLat,
+                          dropLng: prev.pickupLng,
+                        }));
                       }}
                       className="w-9 h-9 md:w-10 md:h-10 rounded-full border border-primary bg-white flex items-center justify-center hover:bg-primary-50 transition-colors mb-0.5 flex-shrink-0"
                     >
@@ -329,12 +383,20 @@ export default function BookTruck() {
                       </label>
                       <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
                         <MapPin className="w-4 h-4 text-neutral-300 mr-2 flex-shrink-0" />
-                        <input
-                          type="text"
+                        <PlacesAutocompleteInput
                           value={form.drop}
-                          onChange={(e) => updateForm("drop", e.target.value)}
-                          onFocus={() => setFocusedField("drop")}
-                          placeholder="Enter drop city"
+                          onChange={(v) => {
+                            updateForm("drop", v);
+                            updateForm("dropLat", null);
+                            updateForm("dropLng", null);
+                          }}
+                          onPlaceSelect={({ address, lat, lng }) => {
+                            updateForm("drop", address);
+                            updateForm("dropLat", lat);
+                            updateForm("dropLng", lng);
+                          }}
+                          inputProps={{ onFocus: () => setFocusedField("drop") }}
+                          placeholder="Enter drop address or city"
                           className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                         />
                       </div>
@@ -348,11 +410,12 @@ export default function BookTruck() {
                         <button
                           key={city}
                           onClick={() => {
-                            if (focusedField === "drop" || (!form.pickup && focusedField !== "pickup")) {
-                              updateForm("drop", city);
-                            } else {
-                              updateForm("pickup", city);
-                            }
+                            const target = focusedField === "drop" || (!form.pickup && focusedField !== "pickup") ? "drop" : "pickup";
+                            updateForm(target, city);
+                            // Coordinates are only known once resolved via Autocomplete/geocoding — a
+                            // quick city-chip pick doesn't carry them, so clear any stale lat/lng.
+                            updateForm(target === "drop" ? "dropLat" : "pickupLat", null);
+                            updateForm(target === "drop" ? "dropLng" : "pickupLng", null);
                           }}
                           className={`px-3 md:px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
                             form.pickup === city || form.drop === city
@@ -699,6 +762,17 @@ export default function BookTruck() {
                           <p className="text-[11px] text-neutral-300 mt-0.5">~{priceBreakdown.distance} km</p>
                         )}
 
+                        {priceBreakdown.trafficMultiplier > 1 && (
+                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-neutral-100">
+                            <span className="text-xs text-neutral-400 flex items-center gap-1">
+                              <Zap className="w-3 h-3 text-amber-500" /> Traffic surge ({priceBreakdown.trafficMultiplier}x)
+                            </span>
+                            <span className="text-xs font-medium text-amber-600">
+                              +₹{Number(priceBreakdown.trafficSurcharge).toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                        )}
+
                         <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
                           <input
                             type="checkbox"
@@ -730,6 +804,16 @@ export default function BookTruck() {
                             <p className="text-[11px] text-neutral-300 mt-1.5">Brokers will see this as your opening offer and can counter it.</p>
                           </div>
                         )}
+                      </div>
+                    ) : quoteError ? (
+                      <div>
+                        <p className="text-xs text-danger">Couldn't calculate the price. Please try again.</p>
+                        <button
+                          onClick={() => setQuoteRetryToken((n) => n + 1)}
+                          className="text-xs font-semibold text-primary mt-1.5 hover:underline"
+                        >
+                          Retry
+                        </button>
                       </div>
                     ) : (
                       <p className="text-xs text-neutral-300">Complete route &amp; truck selection to see price</p>
