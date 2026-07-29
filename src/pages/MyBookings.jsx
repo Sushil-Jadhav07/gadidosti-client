@@ -188,8 +188,11 @@ export default function MyBookings() {
                         <p className="text-[11px] text-neutral-400 mt-0.5">{booking.driver.name}</p>
                       )}
                     </td>
-                    <td className="px-5 py-4">
-                      <p className="text-sm font-semibold text-neutral-700">
+                    <td className="px-5 py-4 max-w-[260px]">
+                      <p
+                        className="text-sm font-semibold text-neutral-700 truncate"
+                        title={`${booking.pickup} → ${booking.drop}`}
+                      >
                         {booking.pickup} → {booking.drop}
                       </p>
                       <p className="text-[11px] text-neutral-400 mt-0.5 capitalize">

@@ -218,9 +218,12 @@ export default function Home() {
                   >
                     {/* Desktop row */}
                     <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1fr] px-5 py-4 items-center">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-[11px] text-neutral-400 font-medium mb-0.5">{bookingRef(booking)}</p>
-                        <p className="text-sm font-semibold text-neutral-700">
+                        <p
+                          className="text-sm font-semibold text-neutral-700 truncate max-w-[220px]"
+                          title={`${booking.pickup} → ${booking.drop}`}
+                        >
                           {booking.pickup} → {booking.drop}
                         </p>
                       </div>
