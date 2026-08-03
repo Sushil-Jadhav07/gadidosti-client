@@ -5,20 +5,25 @@ import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps"
 
 const DEBOUNCE_MS = 220;
 
+// Search is always restricted to India (componentRestrictions/includedRegionCodes below),
+// so the trailing ", India" on every result is dead weight — dropping it buys back visible
+// width in the (necessarily narrow) input before the text has to truncate.
+const stripCountrySuffix = (address) => address?.replace(/,\s*India$/, "") || address;
+
 // Bolds whichever part of the prediction's main text matched what was typed, mirroring
 // how Google's own Autocomplete widget (and most ride-hailing apps) highlight matches —
-// `structured_formatting.main_text_matched_substrings` gives the offsets directly.
-function MatchedText({ prediction }) {
-  const main = prediction.structured_formatting?.main_text || prediction.description;
-  const matches = prediction.structured_formatting?.main_text_matched_substrings || [];
+// `mainText.matches` gives the offsets directly.
+function MatchedText({ placePrediction }) {
+  const main = placePrediction.mainText?.text || placePrediction.text?.text || "";
+  const matches = placePrediction.mainText?.matches || [];
   if (!matches.length) return <>{main}</>;
 
   const parts = [];
   let cursor = 0;
   matches.forEach((m, i) => {
-    if (m.offset > cursor) parts.push(<span key={`n${i}`}>{main.slice(cursor, m.offset)}</span>);
-    parts.push(<span key={`b${i}`} className="font-semibold text-neutral-800">{main.slice(m.offset, m.offset + m.length)}</span>);
-    cursor = m.offset + m.length;
+    if (m.startOffset > cursor) parts.push(<span key={`n${i}`}>{main.slice(cursor, m.startOffset)}</span>);
+    parts.push(<span key={`b${i}`} className="font-semibold text-neutral-800">{main.slice(m.startOffset, m.endOffset)}</span>);
+    cursor = m.endOffset;
   });
   if (cursor < main.length) parts.push(<span key="last">{main.slice(cursor)}</span>);
   return <>{parts}</>;
@@ -26,11 +31,13 @@ function MatchedText({ prediction }) {
 
 // A fully custom-styled address search: Google's own <Autocomplete> widget renders an
 // unstyleable browser-default dropdown (.pac-container, appended straight to <body>) that
-// looks out of place next to the rest of the app. This drives the same underlying
-// AutocompleteService/PlacesService APIs directly and renders the suggestion list ourselves,
-// so it looks and feels like the rest of the product (and like the native map apps users
-// already know) instead of a bolted-on browser widget.
-export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect, placeholder, className, inputRef, inputProps = {} }) {
+// looks out of place next to the rest of the app. This drives the underlying
+// AutocompleteSuggestion/Place APIs directly and renders the suggestion list ourselves, so
+// it looks and feels like the rest of the product instead of a bolted-on browser widget.
+// Deliberately NOT the older AutocompleteService/PlacesService classes — Google deprecated
+// those in March 2025 and blocks them outright for Cloud projects created after that date,
+// which silently degrades results (e.g. location restriction stops working) with no error.
+export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect, placeholder, className, inputRef, inputProps = {}, restrictToCity = null }) {
   const { isLoaded } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -41,9 +48,10 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  // The selected city's real viewport — passed as `locationRestriction` below so
+  // predictions come back confined to that city instead of anywhere in India.
+  const [cityBounds, setCityBounds] = useState(null);
 
-  const autocompleteServiceRef = useRef(null);
-  const placesServiceRef = useRef(null);
   const sessionTokenRef = useRef(null);
   const debounceRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -51,12 +59,45 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
 
   useEffect(() => {
     if (!isLoaded || !window.google?.maps?.places) return;
-    autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
-    // PlacesService needs a Map or a plain DOM node to attach to — it never actually
-    // renders into it, so a detached <div> (never inserted into the page) is fine.
-    placesServiceRef.current = new window.google.maps.places.PlacesService(document.createElement("div"));
     sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
   }, [isLoaded]);
+
+  // Resolved by autocompleting the city name itself, then fetching that place's viewport.
+  useEffect(() => {
+    if (!restrictToCity || !isLoaded || !window.google?.maps?.places) {
+      setCityBounds(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { suggestions } = await window.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          input: restrictToCity,
+          includedRegionCodes: ["in"],
+        });
+        if (cancelled) return;
+        const placePrediction = suggestions?.[0]?.placePrediction;
+        if (!placePrediction) {
+          console.warn(`Could not resolve a place for city "${restrictToCity}" — location search will be unrestricted.`);
+          setCityBounds(null);
+          return;
+        }
+        const place = placePrediction.toPlace();
+        await place.fetchFields({ fields: ["viewport"] });
+        if (cancelled) return;
+        if (!place.viewport) {
+          console.warn(`City "${restrictToCity}" has no viewport — location search will be unrestricted.`);
+        }
+        setCityBounds(place.viewport || null);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn(`Could not resolve bounds for city "${restrictToCity}":`, err);
+          setCityBounds(null);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [restrictToCity, isLoaded]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -66,21 +107,29 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const fetchPredictions = useCallback((input) => {
-    if (!autocompleteServiceRef.current) return;
+  const fetchPredictions = useCallback(async (input) => {
+    if (!window.google?.maps?.places) return;
     setLoading(true);
-    autocompleteServiceRef.current.getPlacePredictions(
-      { input, componentRestrictions: { country: "in" }, sessionToken: sessionTokenRef.current },
-      (results, status) => {
-        // A slower earlier request resolving after a newer one — ignore it.
-        if (input !== latestQueryRef.current) return;
-        setLoading(false);
-        const ok = status === window.google.maps.places.PlacesServiceStatus.OK;
-        setPredictions(ok && results ? results : []);
-        setOpen(true);
-      }
-    );
-  }, []);
+    try {
+      const { suggestions } = await window.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input,
+        includedRegionCodes: ["in"],
+        sessionToken: sessionTokenRef.current,
+        // A hard restriction (not just a bias) — the point of the intra-city restriction.
+        ...(cityBounds ? { locationRestriction: cityBounds } : {}),
+      });
+      // A slower earlier request resolving after a newer one — ignore it.
+      if (input !== latestQueryRef.current) return;
+      setLoading(false);
+      setPredictions(suggestions?.filter((s) => s.placePrediction) || []);
+      setOpen(true);
+    } catch {
+      if (input !== latestQueryRef.current) return;
+      setLoading(false);
+      setPredictions([]);
+      setOpen(true);
+    }
+  }, [cityBounds]);
 
   const handleChange = (e) => {
     const v = e.target.value;
@@ -97,28 +146,29 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
     debounceRef.current = setTimeout(() => fetchPredictions(v), DEBOUNCE_MS);
   };
 
-  const selectPrediction = (prediction) => {
+  const selectPrediction = async (suggestion) => {
     setOpen(false);
     setPredictions([]);
-    if (!placesServiceRef.current) return;
-    placesServiceRef.current.getDetails(
-      { placeId: prediction.place_id, fields: ["geometry", "formatted_address"], sessionToken: sessionTokenRef.current },
-      (place, status) => {
-        // Session tokens group a search-to-selection into one billable session — start a
-        // fresh one now that this session is done.
-        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
-        const ok = status === window.google.maps.places.PlacesServiceStatus.OK;
-        if (ok && place?.geometry?.location) {
-          onPlaceSelect?.({
-            address: place.formatted_address || prediction.description,
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng(),
-          });
-        } else {
-          onChange(prediction.description);
-        }
+    const placePrediction = suggestion.placePrediction;
+    if (!placePrediction) return;
+    const place = placePrediction.toPlace();
+    try {
+      await place.fetchFields({ fields: ["formattedAddress", "location"] });
+      // Session tokens group a search-to-selection into one billable session — start a
+      // fresh one now that this session is done.
+      sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+      if (place.location) {
+        onPlaceSelect?.({
+          address: stripCountrySuffix(place.formattedAddress || placePrediction.text?.text),
+          lat: place.location.lat(),
+          lng: place.location.lng(),
+        });
+      } else {
+        onChange(stripCountrySuffix(placePrediction.text?.text) || "");
       }
-    );
+    } catch {
+      onChange(stripCountrySuffix(placePrediction.text?.text) || "");
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -153,7 +203,8 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
         onFocus={() => { if (predictions.length) setOpen(true); }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className={`${className} pr-6`}
+        title={value}
+        className={`${className} pr-6 truncate`}
         autoComplete="off"
         {...inputProps}
       />
@@ -176,12 +227,12 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
                 <Loader2 className="w-4 h-4 animate-spin" /> Searching...
               </div>
             )}
-            {predictions.map((p, i) => (
+            {predictions.map((s, i) => (
               <button
-                key={p.place_id}
+                key={s.placePrediction.placeId}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => selectPrediction(p)}
+                onClick={() => selectPrediction(s)}
                 onMouseEnter={() => setActiveIndex(i)}
                 className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors border-b border-neutral-50 last:border-b-0 ${
                   i === activeIndex ? "bg-primary-50" : "hover:bg-neutral-50"
@@ -189,9 +240,9 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
               >
                 <MapPin className="w-4 h-4 text-neutral-300 mt-0.5 flex-shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-sm text-neutral-700 truncate"><MatchedText prediction={p} /></p>
-                  {p.structured_formatting?.secondary_text && (
-                    <p className="text-xs text-neutral-400 truncate">{p.structured_formatting.secondary_text}</p>
+                  <p className="text-sm text-neutral-700 truncate"><MatchedText placePrediction={s.placePrediction} /></p>
+                  {s.placePrediction.secondaryText?.text && (
+                    <p className="text-xs text-neutral-400 truncate">{s.placePrediction.secondaryText.text}</p>
                   )}
                 </div>
               </button>

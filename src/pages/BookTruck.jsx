@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Building2, Route, ArrowUpDown, Star, Check, Truck,
+  Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
   Ban, Navigation, Pencil,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
+import NearbyTrucksMap from "../components/NearbyTrucksMap";
 import ChooseBroker from "./ChooseBroker";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef } from "../utils";
+import { TRUCK_IMAGES } from "../lib/truckImages";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
 // ever shown when the live, admin-configured pricing couldn't be fetched at all (see
@@ -23,19 +25,10 @@ const FALLBACK_TRUCKS = [
   { id: "part", name: "Part Load", capacity: "Shared Space", basePrice: null },
 ];
 
-// Maps the 4 fixed truck_category values (see backend config.controller.js VEHICLE_TYPES —
-// there is no 5th category, so every id here is exhaustive) to the closest-matching supplied
-// artwork, ordered by real capacity: small (≤1T) < medium (≤5T) < large (≤20T), with "part"
-// getting the two-trucks icon since it represents shared/combined capacity, not one vehicle size.
-const TRUCK_IMAGES = {
-  small: "/truck/109_ICON_WITHOUT_DIMENSIONS.png",
-  medium: "/truck/Tata_407_deselected.png",
-  large: "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
-  part: "/truck/1149_ICON_WITHOUT_DIMENSIONS.png",
-};
 
 const INITIAL_FORM = {
   transportType: null,
+  city: "",
   pickup: "",
   pickupLat: null,
   pickupLng: null,
@@ -59,6 +52,93 @@ function TipItem({ icon: Icon, title, children }) {
         <p className="text-sm font-semibold text-neutral-800">{title}</p>
         <p className="text-xs text-neutral-400 mt-0.5">{children}</p>
       </div>
+    </div>
+  );
+}
+
+// Lazily fetched once and reused across every mount — public/data/india-cities.json is a
+// pre-flattened, India-only extract (~4.2k cities, 176KB) of the react-country-state-city
+// package's dataset. That package's own city lookups (GetCity/GetAllCities) always fetch
+// its full *global* citiesminified.json (41.6MB, every country) from GitHub Pages on every
+// call, which is a non-starter to load in a booking flow — so the India subset is computed
+// once (see the extraction this was generated with) and shipped as a static asset instead.
+let indiaCitiesPromise = null;
+const loadIndiaCities = () => {
+  if (!indiaCitiesPromise) {
+    indiaCitiesPromise = fetch("/data/india-cities.json")
+      .then((res) => res.json())
+      .catch(() => []);
+  }
+  return indiaCitiesPromise;
+};
+
+// A search-as-you-type city picker over the full India city list, styled like
+// PlacesAutocompleteInput's suggestion list for visual consistency.
+function CityAutocompleteInput({ value, onChange, placeholder = "Search for a city" }) {
+  const [allCities, setAllCities] = useState(null); // null = still loading
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadIndiaCities().then((data) => { if (!cancelled) setAllCities(data); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const query = value.trim().toLowerCase();
+  const matches = !allCities ? [] : !query
+    ? allCities.slice(0, 8)
+    // Cities starting with the typed text rank above cities merely containing it —
+    // typing "pun" should surface Pune before, say, Kanpur.
+    : [
+        ...allCities.filter((c) => c.name.toLowerCase().startsWith(query)),
+        ...allCities.filter((c) => !c.name.toLowerCase().startsWith(query) && c.name.toLowerCase().includes(query)),
+      ].slice(0, 30);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={allCities === null ? "Loading cities..." : placeholder}
+        disabled={allCities === null}
+        autoComplete="off"
+        className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all disabled:opacity-60"
+      />
+
+      {open && matches.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-2 bg-white rounded-xl shadow-card border border-neutral-100 overflow-hidden">
+          <div className="max-h-64 overflow-y-auto">
+            {matches.map((city) => (
+              <button
+                key={`${city.name}-${city.state}`}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onChange(city.name); setOpen(false); }}
+                className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm transition-colors border-b border-neutral-50 last:border-b-0 ${
+                  value === city.name ? "bg-primary-50 text-primary font-medium" : "text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <MapPin className="w-3.5 h-3.5 text-neutral-300 flex-shrink-0" />
+                  <span className="truncate">{city.name}</span>
+                </span>
+                <span className="text-xs text-neutral-300 flex-shrink-0">{city.state}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -91,6 +171,7 @@ export default function BookTruck() {
   // it resolves after being superseded (see the effect below for how this is used).
   const quoteRequestId = useRef(0);
   const [confirming, setConfirming] = useState(false);
+  const [validatingLocation, setValidatingLocation] = useState(false);
   const [form, setForm] = useState(INITIAL_FORM);
   const [focusedField, setFocusedField] = useState(null);
   // Set once the booking is created at Review-confirm; drives step 6 (Choose Broker), which
@@ -194,6 +275,7 @@ export default function BookTruck() {
     }
 
     const composedNotes = form.notes.trim();
+    const selectedTruck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
 
     setConfirming(true);
     try {
@@ -204,16 +286,21 @@ export default function BookTruck() {
         drop_location: form.drop,
         drop_lat: form.dropLat,
         drop_lng: form.dropLng,
-        truck_category: form.truckType,
         transport_type: form.transportType,
+        city: form.transportType === "intra" ? form.city : undefined,
+        truck_type: selectedTruck?.name,
+        truck_category: form.truckType,
         weight: form.weight,
+        weight_unit: "tons",
         quantity: form.quantity,
         material: form.materialType,
         notes: composedNotes || undefined,
-        amount: finalAmount,
+        // No date/time picker in this flow yet — every booking is "now".
+        scheduled_date: new Date().toISOString(),
         distance: priceBreakdown.distance,
         duration_min: priceBreakdown.durationMin,
         duration_in_traffic_min: priceBreakdown.durationInTrafficMin,
+        amount: finalAmount,
         payment_status: "pending",
       }, token);
 
@@ -235,6 +322,36 @@ export default function BookTruck() {
     }
   };
 
+  // Gate for leaving Step 2: the backend is the source of truth on whether pickup/drop
+  // are valid for the chosen transport type (e.g. both inside the selected intra-city
+  // city) — only advance to Step 3 once it confirms that.
+  const handleValidateLocation = async () => {
+    setValidatingLocation(true);
+    try {
+      const response = await api.post("/api/bookings/validate-location", {
+        pickup_location: form.pickup,
+        drop_location: form.drop,
+        transport_type: form.transportType,
+        city: form.transportType === "intra" ? form.city : undefined,
+      }, token);
+
+      if (!response?.success) {
+        // The backend only reports a generic "Validation failed" — for an intra-city trip
+        // the near-universal cause is one of the two addresses falling outside the chosen
+        // city, so surface that reason directly instead of the opaque backend message.
+        const message = form.transportType === "intra" && form.city
+          ? `Pickup and drop must both be within ${form.city} for an Intra-City booking. Please choose a location inside ${form.city}.`
+          : response?.message || "These pickup/drop locations aren't valid for this trip";
+        throw new Error(message);
+      }
+      setStep(3);
+    } catch (err) {
+      toast.error(err?.message || "These pickup/drop locations aren't valid for this trip");
+    } finally {
+      setValidatingLocation(false);
+    }
+  };
+
   // The booking's already been created by the time step 6 (Choose Broker) is showing — there's
   // no safe "previous step" to rewind to (Review's Confirm button would just create a second,
   // duplicate booking). So going back from Choose Broker restarts the whole wizard fresh instead.
@@ -246,7 +363,7 @@ export default function BookTruck() {
   };
 
   const canContinue =
-    (step === 1 && !!form.transportType) ||
+    (step === 1 && !!form.transportType && (form.transportType !== "intra" || !!form.city)) ||
     (step === 2 && !!form.pickup && !!form.drop) ||
     step === 3 ||
     (step === 4 && !!form.truckType) ||
@@ -278,7 +395,9 @@ export default function BookTruck() {
                 <Route className="w-4 h-4 text-success flex-shrink-0" />
               )}
               <span className="text-sm font-medium text-neutral-700">
-                {form.transportType === "intra" ? "Intra-City" : "Inter-City"}
+                {form.transportType === "intra"
+                  ? `Intra-City${form.city ? ` · ${form.city}` : ""}`
+                  : "Inter-City"}
               </span>
             </div>
           )}
@@ -496,6 +615,21 @@ export default function BookTruck() {
                       )}
                     </button>
                   </div>
+
+                  {/* Only intra-city trips need this — inter-city pickup/drop can be any two
+                      cities, so there's nothing to pin down here. Picking the city up front
+                      lets Step 2 restrict the address search to it (see restrictToCity below). */}
+                  {form.transportType === "intra" && (
+                    <div className="mt-5">
+                      <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
+                        Select City
+                      </label>
+                      <CityAutocompleteInput
+                        value={form.city}
+                        onChange={(city) => updateForm("city", city)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -543,8 +677,9 @@ export default function BookTruck() {
                               updateForm("pickupLat", lat);
                               updateForm("pickupLng", lng);
                             }}
+                            restrictToCity={form.transportType === "intra" ? form.city : null}
                             inputProps={{ onFocus: () => setFocusedField("pickup") }}
-                            placeholder="Enter pickup address or city"
+                            placeholder={form.transportType === "intra" && form.city ? `Enter pickup address in ${form.city}` : "Enter pickup address or city"}
                             className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                           />
                         </div>
@@ -567,8 +702,9 @@ export default function BookTruck() {
                               updateForm("dropLat", lat);
                               updateForm("dropLng", lng);
                             }}
+                            restrictToCity={form.transportType === "intra" ? form.city : null}
                             inputProps={{ onFocus: () => setFocusedField("drop") }}
-                            placeholder="Enter drop address or city"
+                            placeholder={form.transportType === "intra" && form.city ? `Enter drop address in ${form.city}` : "Enter drop address or city"}
                             className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                           />
                         </div>
@@ -595,6 +731,9 @@ export default function BookTruck() {
                     </div>
                   </div>
 
+                  {/* Intra-city trips already locked in a single city on Step 1 — a
+                      city-picker chip row here would be redundant, so it's inter-city only. */}
+                  {form.transportType !== "intra" && (
                   <div>
                     <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-3">Popular Cities</p>
                     <div className="flex flex-wrap gap-2">
@@ -620,6 +759,7 @@ export default function BookTruck() {
                       ))}
                     </div>
                   </div>
+                  )}
                 </div>
               )}
 
@@ -775,64 +915,44 @@ export default function BookTruck() {
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Choose a vehicle</h2>
-                  <p className="text-sm text-neutral-400 mb-6">Select the best option for your load.</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <p className="text-sm text-neutral-400 mb-4">Select the best option for your load.</p>
+
+                  {/* Compact category selector — still drives form.truckType (needed for the
+                      price estimate, the nearby-trucks filter below, and truck_category on
+                      submit), just no longer the large per-category card grid. */}
+                  <div className="flex flex-wrap gap-2 mb-2">
                     {truckOptions.map((truckOpt) => (
                       <button
                         key={truckOpt.id}
                         onClick={() => updateForm("truckType", truckOpt.id)}
-                        className={`relative flex items-start gap-4 p-4 rounded-xl border-2 transition-all duration-200 text-left active:scale-[0.98] ${
+                        className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
                           form.truckType === truckOpt.id
                             ? truckOpt.id === "part"
-                              ? "border-success/40 bg-green-50"
-                              : "border-primary bg-primary-50"
-                            : "border-neutral-100 bg-neutral-50 hover:border-neutral-200 hover:bg-white hover:shadow-card"
+                              ? "border-success/40 bg-green-50 text-success"
+                              : "border-primary bg-primary-50 text-primary"
+                            : "border-neutral-100 bg-neutral-50 text-neutral-600 hover:border-neutral-200 hover:bg-white"
                         }`}
                       >
-                        <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-shrink-0 p-1.5 ${
-                          truckOpt.id === "part" ? "bg-success/10" : "bg-primary-50"
-                        }`}>
-                          {TRUCK_IMAGES[truckOpt.id] ? (
-                            <img src={TRUCK_IMAGES[truckOpt.id]} alt={truckOpt.name} className="w-full h-full object-contain" />
-                          ) : (
-                            <Truck className={`w-6 h-6 ${truckOpt.id === "part" ? "text-success" : "text-primary"}`} />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0 pr-6">
-                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                            <h4 className="font-poppins font-semibold text-sm text-neutral-800">{truckOpt.name}</h4>
-                            {truckOpt.featured && (
-                              <span className="inline-flex items-center gap-1 bg-success text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
-                                <Star className="w-2.5 h-2.5 fill-white" /> SAVE {truckOpt.savePercent}%
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-neutral-400">{truckOpt.capacity}</p>
-                          {truckOpt.basePrice != null ? (
-                            <p className="font-poppins font-bold text-base text-primary mt-2 tabular-nums">
-                              ₹{truckOpt.basePrice.toLocaleString("en-IN")}
-                              <span className="text-xs font-normal text-neutral-400 ml-1">base</span>
-                            </p>
-                          ) : (
-                            <p className="font-poppins font-semibold text-sm text-primary mt-2">Billed by capacity used</p>
-                          )}
-                        </div>
-                        <div
-                          className={`absolute top-4 right-4 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                            form.truckType === truckOpt.id
-                              ? truckOpt.id === "part"
-                                ? "border-success bg-success"
-                                : "border-primary bg-primary"
-                              : "border-neutral-200"
-                          }`}
-                        >
-                          {form.truckType === truckOpt.id && (
-                            <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                          )}
-                        </div>
+                        {TRUCK_IMAGES[truckOpt.id] ? (
+                          <img src={TRUCK_IMAGES[truckOpt.id]} alt="" className="w-6 h-6 object-contain flex-shrink-0" />
+                        ) : (
+                          <Truck className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        <span>{truckOpt.name}</span>
+                        <span className="text-xs text-neutral-400">· {truckOpt.capacity}</span>
+                        {form.truckType === truckOpt.id && <Check className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={3} />}
                       </button>
                     ))}
                   </div>
+
+                  <NearbyTrucksMap
+                    pickupLat={form.pickupLat}
+                    pickupLng={form.pickupLng}
+                    dropLat={form.dropLat}
+                    dropLng={form.dropLng}
+                    truckCategory={form.truckType}
+                    capacity={truck?.capacity}
+                  />
                 </div>
               )}
 
@@ -932,13 +1052,16 @@ export default function BookTruck() {
               )}
               <button
                 onClick={() => {
-                  if (step < 5) setStep(step + 1);
+                  if (step === 2) handleValidateLocation();
+                  else if (step < 5) setStep(step + 1);
                   else handleConfirm();
                 }}
-                disabled={!canContinue || confirming}
+                disabled={!canContinue || confirming || validatingLocation}
                 className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
               >
-                {step === 5 ? (confirming ? "Confirming..." : "Confirm & Choose Broker") : "Continue"}
+                {step === 5 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
+                  : step === 2 ? (validatingLocation ? "Validating..." : "Continue")
+                  : "Continue"}
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
               </button>
             </div>
