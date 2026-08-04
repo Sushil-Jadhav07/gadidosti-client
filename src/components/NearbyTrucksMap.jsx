@@ -9,8 +9,57 @@ import { api, getToken } from "../services/api";
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const RADIUS_PRESETS_KM = [5, 10, 25, 50];
 const ANIM_MS = 1000;
-const MAP_OPTIONS = { streetViewControl: false, mapTypeControl: false, fullscreenControl: false, clickableIcons: false };
-const PIN_ICON = (color) => `https://maps.google.com/mapfiles/ms/icons/${color}-dot.png`;
+
+// A muted, minimal-label theme (no business/POI icons, no transit clutter, pale roads and
+// water) — the same general look ride-hailing apps use so the map reads as a clean canvas
+// for our own pickup/drop/truck markers rather than a busy default Google Maps tile.
+const MAP_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
+  { featureType: "administrative.neighborhood", stylers: [{ visibility: "off" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#c9d8e3" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+];
+
+const MAP_OPTIONS = {
+  streetViewControl: false,
+  mapTypeControl: false,
+  fullscreenControl: false,
+  clickableIcons: false,
+  // Lets the mouse wheel zoom directly instead of showing Google's "use ctrl+scroll" nag,
+  // appropriate here since this map lives in its own fixed-height panel, not a full page.
+  gestureHandling: "greedy",
+  styles: MAP_STYLE,
+};
+
+// A real teardrop pin (not the tiny legacy "-dot" icon) so pickup/drop are unmistakable
+// against the map — a white core on a solid color, matching the blue-pickup/green-drop
+// convention used everywhere else in this app (MapView, TrackShipment, the address step).
+// Built once per color via useMemo below (NOT called inline in JSX) — this map re-renders
+// on every animation frame while trucks are moving, and rebuilding a fresh data-URI/Size/
+// Point object 60x/second made Google Maps repeatedly reload the icon, flickering it
+// invisible more often than not.
+const buildPinIcon = (color) => ({
+  url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="42" viewBox="0 0 30 42">` +
+    `<path d="M15 0C6.7 0 0 6.7 0 15c0 11.25 15 27 15 27s15-15.75 15-27C30 6.7 23.3 0 15 0z" fill="${color}"/>` +
+    `<circle cx="15" cy="15" r="6" fill="#fff"/>` +
+    `</svg>`
+  )}`,
+  scaledSize: new window.google.maps.Size(30, 42),
+  anchor: new window.google.maps.Point(15, 42),
+});
 
 const easedPositionAt = (anim, now) => {
   const t = Math.min(1, (now - anim.start) / ANIM_MS);
@@ -64,6 +113,12 @@ function useAnimatedPositions(targets) {
 // connection — same server/auth pattern as ChatWindow — streams live position updates for
 // exactly the trucks currently in view, joining/leaving tracking rooms as that set changes.
 export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, truckCategory, capacity }) {
+  // TEMP DEBUG — remove once we confirm whether pickup/drop coords actually reach this
+  // component. Fires whenever any of the four values change.
+  useEffect(() => {
+    console.log("[NearbyTrucksMap] received props:", { pickupLat, pickupLng, dropLat, dropLng });
+  }, [pickupLat, pickupLng, dropLat, dropLng]);
+
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -154,11 +209,53 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     .filter(Boolean), [trucks, liveByTruck]);
 
   const animatedPositions = useAnimatedPositions(targets);
-  const center = hasPickup ? { lat: pickupLat, lng: pickupLng } : undefined;
   const sortedTrucks = useMemo(
     () => [...trucks].sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0)),
     [trucks]
   );
+
+  // Stable object identities across the ~60fps animation-driven re-renders above — without
+  // this, GoogleMap/Marker/Circle would see a "changed" prop every single frame (even though
+  // the actual lat/lng/color never did) and redo work needlessly.
+  const center = useMemo(
+    () => (hasPickup ? { lat: pickupLat, lng: pickupLng } : undefined),
+    [hasPickup, pickupLat, pickupLng]
+  );
+  const dropPosition = useMemo(
+    () => (dropLat != null && dropLng != null ? { lat: dropLat, lng: dropLng } : undefined),
+    [dropLat, dropLng]
+  );
+  const pickupIcon = useMemo(() => (isLoaded ? buildPinIcon("#1976FF") : undefined), [isLoaded]);
+  const dropIcon = useMemo(() => (isLoaded ? buildPinIcon("#17D86B") : undefined), [isLoaded]);
+  const circleOptions = useMemo(() => ({
+    fillColor: "#1976FF",
+    fillOpacity: 0.08,
+    strokeColor: "#1976FF",
+    strokeOpacity: 0.4,
+    strokeWeight: 1.5,
+    clickable: false,
+  }), []);
+  // One small icon per (category, hovered?) pair — a handful of combinations at most, built
+  // once the map's loaded rather than freshly on every animation-frame re-render.
+  const truckIcons = useMemo(() => {
+    if (!isLoaded) return {};
+    const icons = {};
+    Object.entries(TRUCK_IMAGES).forEach(([category, url]) => {
+      [28, 36].forEach((size) => {
+        icons[`${category}-${size}`] = {
+          url,
+          scaledSize: new window.google.maps.Size(size, size),
+          anchor: new window.google.maps.Point(size / 2, size / 2),
+        };
+      });
+    });
+    return icons;
+  }, [isLoaded]);
+
+  // TEMP DEBUG — remove alongside the props log above.
+  useEffect(() => {
+    console.log("[NearbyTrucksMap] derived:", { hasPickup, center, dropPosition, isLoaded });
+  }, [hasPickup, center, dropPosition, isLoaded]);
 
   return (
     <div className="mt-8">
@@ -255,23 +352,10 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
               </div>
             ) : (
               <>
-                <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={12} options={MAP_OPTIONS}>
-                  <Circle
-                    center={center}
-                    radius={radiusKm * 1000}
-                    options={{
-                      fillColor: "#1976FF",
-                      fillOpacity: 0.08,
-                      strokeColor: "#1976FF",
-                      strokeOpacity: 0.4,
-                      strokeWeight: 1.5,
-                      clickable: false,
-                    }}
-                  />
-                  <Marker position={center} icon={{ url: PIN_ICON("blue") }} title="Pickup" />
-                  {dropLat != null && dropLng != null && (
-                    <Marker position={{ lat: dropLat, lng: dropLng }} icon={{ url: PIN_ICON("green") }} title="Drop" />
-                  )}
+                <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={13} options={MAP_OPTIONS}>
+                  <Circle center={center} radius={radiusKm * 1000} options={circleOptions} />
+                  <Marker position={center} icon={pickupIcon} title="Pickup" zIndex={1000} />
+                  {dropPosition && <Marker position={dropPosition} icon={dropIcon} title="Drop" zIndex={1000} />}
                   {trucks.map((t) => {
                     const pos = animatedPositions[String(t.id)];
                     if (!pos) return null;
@@ -283,11 +367,7 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
                         position={pos}
                         title={`${t.registration}${t.distanceKm != null ? ` · ${Number(t.distanceKm).toFixed(1)} km away` : ""}`}
                         zIndex={isHovered ? 999 : undefined}
-                        icon={TRUCK_IMAGES[t.category] ? {
-                          url: TRUCK_IMAGES[t.category],
-                          scaledSize: new window.google.maps.Size(size, size),
-                          anchor: new window.google.maps.Point(size / 2, size / 2),
-                        } : undefined}
+                        icon={truckIcons[`${t.category}-${size}`]}
                       />
                     );
                   })}

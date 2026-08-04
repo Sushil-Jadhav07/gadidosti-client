@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
-  Ban, Navigation, Pencil,
+  Ban, Navigation, Pencil, LocateFixed,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -12,6 +13,7 @@ import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef } from "../utils";
 import { TRUCK_IMAGES } from "../lib/truckImages";
+import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
 // ever shown when the live, admin-configured pricing couldn't be fetched at all (see
@@ -143,6 +145,62 @@ function CityAutocompleteInput({ value, onChange, placeholder = "Search for a ci
   );
 }
 
+// A custom-styled, type-to-filter dropdown for Material Type, replacing the native
+// <input list="..."> + <datalist> combo — datalist's suggestion popup is rendered by the
+// OS/browser (a jarring plain black box on Windows/Chrome) and can't be styled at all.
+// Still free-text like the datalist it replaces (admin-configured materialTypes are
+// suggestions, not a hard enum), just with a dropdown that matches the rest of the app.
+function MaterialTypeInput({ options, value, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const query = value.trim().toLowerCase();
+  const matches = query ? options.filter((o) => o.toLowerCase().includes(query)) : options;
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        autoComplete="off"
+        className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all"
+      />
+
+      {open && matches.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-2 bg-white rounded-xl shadow-card border border-neutral-100 overflow-hidden">
+          <div className="max-h-56 overflow-y-auto">
+            {matches.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onChange(option); setOpen(false); }}
+                className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors border-b border-neutral-50 last:border-b-0 ${
+                  value === option ? "bg-primary-50 text-primary font-medium" : "text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                <span className="truncate">{option}</span>
+                {value === option && <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidePanel({ title, children }) {
   return (
     <div className="bg-white rounded-2xl shadow-card p-5">
@@ -177,8 +235,55 @@ export default function BookTruck() {
   // Set once the booking is created at Review-confirm; drives step 6 (Choose Broker), which
   // renders inline in this same wizard instead of navigating to a separate route.
   const [createdBooking, setCreatedBooking] = useState(null);
+  const [locatingPickup, setLocatingPickup] = useState(false);
+
+  // Loaded here (not just inside PlacesAutocompleteInput) so "Use my current location" knows
+  // whether window.google.maps.Geocoder is actually ready before it lets the user click it.
+  const { isLoaded: mapsLoaded } = useJsApiLoader({
+    id: GOOGLE_MAPS_SCRIPT_ID,
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+  });
 
   const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Reverse-geocodes the browser's GPS position into a street address for the Pickup field —
+  // uses google.maps.Geocoder (the Geocoding API, a separate Google product from Places, not
+  // part of the AutocompleteService/PlacesService deprecation PlacesAutocompleteInput works
+  // around) since reverse geocoding by coordinates isn't something the Places API itself does.
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("Location isn't available on this device or browser");
+      return;
+    }
+    if (!mapsLoaded) {
+      toast.error("Map is still loading — please try again in a moment");
+      return;
+    }
+    setLocatingPickup(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const geocoder = new window.google.maps.Geocoder();
+          const { results } = await geocoder.geocode({ location: { lat: latitude, lng: longitude } });
+          const address = results?.[0]?.formatted_address?.replace(/,\s*India$/, "");
+          updateForm("pickup", address || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+          updateForm("pickupLat", latitude);
+          updateForm("pickupLng", longitude);
+        } catch {
+          toast.error("Couldn't determine your address from this location");
+        } finally {
+          setLocatingPickup(false);
+        }
+      },
+      (err) => {
+        setLocatingPickup(false);
+        toast.error(err?.code === err.PERMISSION_DENIED ? "Location permission denied" : "Couldn't get your current location");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -661,9 +766,24 @@ export default function BookTruck() {
 
                     <div className="flex-1 min-w-0 space-y-3">
                       <div>
-                        <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
-                          Pickup From
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                            Pickup From
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleUseCurrentLocation}
+                            disabled={locatingPickup}
+                            className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                          >
+                            {locatingPickup ? (
+                              <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                            ) : (
+                              <LocateFixed className="w-3 h-3" />
+                            )}
+                            {locatingPickup ? "Locating..." : "Use current location"}
+                          </button>
+                        </div>
                         <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
                           <PlacesAutocompleteInput
                             value={form.pickup}
@@ -775,9 +895,8 @@ export default function BookTruck() {
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Tell us about your package</h2>
                   <p className="text-sm text-neutral-400 mb-6">Accurate details help us suggest the right vehicle and fare.</p>
 
-                  {/* Package category — driven by the same admin-configured materialTypes list
-                      the old free-text field used (never a hardcoded set), just presented as
-                      selectable cards instead of a datalist input. */}
+                  {/* Package category — free text, suggestions driven by the admin-configured
+                      materialTypes list (never a hardcoded set). */}
                   <div className="border border-neutral-100 rounded-xl p-4 hover:border-neutral-200 transition-colors mb-6">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
@@ -785,17 +904,12 @@ export default function BookTruck() {
                       </span>
                       <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Material Type</label>
                     </div>
-                    <input
-                      type="text"
-                      list="material-type-suggestions"
+                    <MaterialTypeInput
+                      options={materialTypes}
                       value={form.materialType}
-                      onChange={(e) => updateForm("materialType", e.target.value)}
+                      onChange={(v) => updateForm("materialType", v)}
                       placeholder="e.g. Electronics, Furniture, Textiles..."
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all"
                     />
-                    <datalist id="material-type-suggestions">
-                      {materialTypes.map((option) => <option key={option} value={option} />)}
-                    </datalist>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 md:gap-6">
@@ -945,6 +1059,10 @@ export default function BookTruck() {
                     ))}
                   </div>
 
+                  {console.log("[BookTruck] Step 4 location values:", {
+                    pickup: form.pickup, pickupLat: form.pickupLat, pickupLng: form.pickupLng,
+                    drop: form.drop, dropLat: form.dropLat, dropLng: form.dropLng,
+                  })}
                   <NearbyTrucksMap
                     pickupLat={form.pickupLat}
                     pickupLng={form.pickupLng}
