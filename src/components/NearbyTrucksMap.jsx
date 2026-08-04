@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMap, useJsApiLoader, Marker, Circle } from "@react-google-maps/api";
+import { GoogleMap, useJsApiLoader, Marker, Circle, DirectionsService, DirectionsRenderer, TrafficLayer } from "@react-google-maps/api";
 import { io } from "socket.io-client";
-import { Truck as TruckIcon, RefreshCw } from "lucide-react";
+import { Truck as TruckIcon, RefreshCw, Check } from "lucide-react";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 import { TRUCK_IMAGES } from "../lib/truckImages";
 import { api, getToken } from "../services/api";
@@ -112,13 +112,7 @@ function useAnimatedPositions(targets) {
 // (re-fetched on radius/category/capacity change) seeds the list and map, then a Socket.IO
 // connection — same server/auth pattern as ChatWindow — streams live position updates for
 // exactly the trucks currently in view, joining/leaving tracking rooms as that set changes.
-export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, truckCategory, capacity }) {
-  // TEMP DEBUG — remove once we confirm whether pickup/drop coords actually reach this
-  // component. Fires whenever any of the four values change.
-  useEffect(() => {
-    console.log("[NearbyTrucksMap] received props:", { pickupLat, pickupLng, dropLat, dropLng });
-  }, [pickupLat, pickupLng, dropLat, dropLng]);
-
+export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, truckCategory, capacity, selectedTruckId, onSelectTruck }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -241,7 +235,7 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     if (!isLoaded) return {};
     const icons = {};
     Object.entries(TRUCK_IMAGES).forEach(([category, url]) => {
-      [28, 36].forEach((size) => {
+      [28, 36, 40].forEach((size) => {
         icons[`${category}-${size}`] = {
           url,
           scaledSize: new window.google.maps.Size(size, size),
@@ -252,10 +246,22 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     return icons;
   }, [isLoaded]);
 
-  // TEMP DEBUG — remove alongside the props log above.
+  // The actual driving route between pickup and drop (not just a straight line) — the same
+  // black polyline convention Uber/Ola use. Re-requested only when pickup/drop actually
+  // change (the reset effect below), never on the ~60fps animation-driven re-renders.
+  const [directions, setDirections] = useState(null);
+  const [directionsRequested, setDirectionsRequested] = useState(false);
+
   useEffect(() => {
-    console.log("[NearbyTrucksMap] derived:", { hasPickup, center, dropPosition, isLoaded });
-  }, [hasPickup, center, dropPosition, isLoaded]);
+    setDirections(null);
+    setDirectionsRequested(false);
+  }, [center?.lat, center?.lng, dropPosition?.lat, dropPosition?.lng]);
+
+  const directionsRendererOptions = useMemo(() => ({
+    suppressMarkers: true,
+    preserveViewport: true,
+    polylineOptions: { strokeColor: "#000000", strokeWeight: 4, strokeOpacity: 0.85 },
+  }), []);
 
   return (
     <div className="mt-8">
@@ -306,35 +312,45 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
               </div>
             ) : (
               <div className="divide-y divide-neutral-100">
-                {sortedTrucks.map((t) => (
-                  <div
-                    key={t.id}
-                    onMouseEnter={() => setHoveredId(String(t.id))}
-                    onMouseLeave={() => setHoveredId(null)}
-                    className={`p-3 flex items-start gap-3 transition-colors ${hoveredId === String(t.id) ? "bg-primary-50" : "hover:bg-white"}`}
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1 border border-neutral-100">
-                      {TRUCK_IMAGES[t.category] ? (
-                        <img src={TRUCK_IMAGES[t.category]} alt={t.category} className="w-full h-full object-contain" />
-                      ) : (
-                        <TruckIcon className="w-5 h-5 text-primary" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-neutral-800 truncate">{t.registration}</p>
-                      <p className="text-xs text-neutral-400 truncate">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
-                      <p className="text-[11px] text-neutral-400">{t.capacity}{t.year ? ` · ${t.year}` : ""}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        {t.distanceKm != null && (
-                          <span className="text-[11px] font-semibold text-primary">{Number(t.distanceKm).toFixed(1)} km away</span>
+                {sortedTrucks.map((t) => {
+                  const isSelected = String(selectedTruckId) === String(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onSelectTruck?.(t)}
+                      onMouseEnter={() => setHoveredId(String(t.id))}
+                      onMouseLeave={() => setHoveredId(null)}
+                      className={`w-full p-3 flex items-start gap-3 text-left transition-colors ${
+                        isSelected ? "bg-primary-50" : hoveredId === String(t.id) ? "bg-neutral-100" : "hover:bg-white"
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1 border ${isSelected ? "border-primary" : "border-neutral-100"}`}>
+                        {TRUCK_IMAGES[t.category] ? (
+                          <img src={TRUCK_IMAGES[t.category]} alt={t.category} className="w-full h-full object-contain" />
+                        ) : (
+                          <TruckIcon className="w-5 h-5 text-primary" />
                         )}
-                        <span className="inline-flex items-center gap-1 text-[10px] text-success">
-                          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> Live
-                        </span>
                       </div>
-                    </div>
-                  </div>
-                ))}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-semibold text-neutral-800 truncate">{t.registration}</p>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" strokeWidth={3} />}
+                        </div>
+                        <p className="text-xs text-neutral-400 truncate">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
+                        <p className="text-[11px] text-neutral-400">{t.capacity}{t.year ? ` · ${t.year}` : ""}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {t.distanceKm != null && (
+                            <span className="text-[11px] font-semibold text-primary">{Number(t.distanceKm).toFixed(1)} km away</span>
+                          )}
+                          <span className="inline-flex items-center gap-1 text-[10px] text-success">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> Live
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -353,21 +369,43 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
             ) : (
               <>
                 <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={13} options={MAP_OPTIONS}>
+                  {/* Google's live traffic layer — congestion coloring plus incident icons
+                      (accidents, closures, construction) drawn directly on the road tiles. */}
+                  <TrafficLayer />
                   <Circle center={center} radius={radiusKm * 1000} options={circleOptions} />
+                  {center && dropPosition && !directionsRequested && (
+                    <DirectionsService
+                      options={{
+                        origin: center,
+                        destination: dropPosition,
+                        travelMode: "DRIVING",
+                        // Routes and durations reflect current traffic conditions, not just
+                        // free-flow distance — matching what Ola/Uber factor into their route.
+                        drivingOptions: { departureTime: new Date(), trafficModel: "bestguess" },
+                      }}
+                      callback={(result, status) => {
+                        setDirectionsRequested(true);
+                        if (status === "OK" && result) setDirections(result);
+                      }}
+                    />
+                  )}
+                  {directions && <DirectionsRenderer directions={directions} options={directionsRendererOptions} />}
                   <Marker position={center} icon={pickupIcon} title="Pickup" zIndex={1000} />
                   {dropPosition && <Marker position={dropPosition} icon={dropIcon} title="Drop" zIndex={1000} />}
                   {trucks.map((t) => {
                     const pos = animatedPositions[String(t.id)];
                     if (!pos) return null;
+                    const isSelected = String(selectedTruckId) === String(t.id);
                     const isHovered = hoveredId === String(t.id);
-                    const size = isHovered ? 36 : 28;
+                    const size = isSelected ? 40 : isHovered ? 36 : 28;
                     return (
                       <Marker
                         key={t.id}
                         position={pos}
                         title={`${t.registration}${t.distanceKm != null ? ` · ${Number(t.distanceKm).toFixed(1)} km away` : ""}`}
-                        zIndex={isHovered ? 999 : undefined}
+                        zIndex={isSelected ? 1000 : isHovered ? 999 : undefined}
                         icon={truckIcons[`${t.category}-${size}`]}
+                        onClick={() => onSelectTruck?.(t)}
                       />
                     );
                   })}

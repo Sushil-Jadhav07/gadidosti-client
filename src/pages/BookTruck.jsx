@@ -12,7 +12,6 @@ import ChooseBroker from "./ChooseBroker";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef } from "../utils";
-import { TRUCK_IMAGES } from "../lib/truckImages";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
@@ -43,6 +42,7 @@ const INITIAL_FORM = {
   materialType: "",
   notes: "",
   truckType: null,
+  selectedTruckId: null,
 };
 
 function TipItem({ icon: Icon, title, children }) {
@@ -893,48 +893,22 @@ export default function BookTruck() {
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
-                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Choose a vehicle</h2>
-                  <p className="text-sm text-neutral-400 mb-4">Select the best option for your load.</p>
+                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Pick your truck</h2>
+                  <p className="text-sm text-neutral-400 mb-4">Tap a truck below to select it.</p>
 
-                  {/* Compact category selector — still drives form.truckType (needed for the
-                      price estimate, the nearby-trucks filter below, and truck_category on
-                      submit), just no longer the large per-category card grid. */}
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {truckOptions.map((truckOpt) => (
-                      <button
-                        key={truckOpt.id}
-                        onClick={() => updateForm("truckType", truckOpt.id)}
-                        className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
-                          form.truckType === truckOpt.id
-                            ? truckOpt.id === "part"
-                              ? "border-success/40 bg-green-50 text-success"
-                              : "border-primary bg-primary-50 text-primary"
-                            : "border-neutral-100 bg-neutral-50 text-neutral-600 hover:border-neutral-200 hover:bg-white"
-                        }`}
-                      >
-                        {TRUCK_IMAGES[truckOpt.id] ? (
-                          <img src={TRUCK_IMAGES[truckOpt.id]} alt="" className="w-6 h-6 object-contain flex-shrink-0" />
-                        ) : (
-                          <Truck className="w-4 h-4 flex-shrink-0" />
-                        )}
-                        <span>{truckOpt.name}</span>
-                        <span className="text-xs text-neutral-400">· {truckOpt.capacity}</span>
-                        {form.truckType === truckOpt.id && <Check className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={3} />}
-                      </button>
-                    ))}
-                  </div>
-
-                  {console.log("[BookTruck] Truck step location values:", {
-                    pickup: form.pickup, pickupLat: form.pickupLat, pickupLng: form.pickupLng,
-                    drop: form.drop, dropLat: form.dropLat, dropLng: form.dropLng,
-                  })}
+                  {/* No more abstract category picker — form.truckType (needed for the price
+                      estimate and truck_category on submit) now comes from whichever real
+                      nearby truck the user taps, via its own category field. */}
                   <NearbyTrucksMap
                     pickupLat={form.pickupLat}
                     pickupLng={form.pickupLng}
                     dropLat={form.dropLat}
                     dropLng={form.dropLng}
-                    truckCategory={form.truckType}
-                    capacity={truck?.capacity}
+                    selectedTruckId={form.selectedTruckId}
+                    onSelectTruck={(t) => {
+                      updateForm("selectedTruckId", t.id);
+                      updateForm("truckType", t.category);
+                    }}
                   />
                 </div>
               )}
