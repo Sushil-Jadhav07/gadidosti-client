@@ -1,13 +1,13 @@
 import React from "react";
 import { Check } from "lucide-react";
 
-const STEP_NAMES = ["Transport", "Locations", "Load Info", "Truck", "Review", "Broker"];
+const STEP_NAMES = ["Location", "Load Info", "Truck", "Review", "Broker"];
 
 export default function StepIndicator({ currentStep, onStepClick }) {
   return (
     <div className="bg-white rounded-2xl shadow-card px-4 md:px-6 py-4 mb-6">
       <div className="flex items-center justify-between">
-        {[1, 2, 3, 4, 5, 6].map((step, index) => {
+        {[1, 2, 3, 4, 5].map((step, index) => {
           const isDone = step < currentStep;
           const isCurrent = step === currentStep;
           const clickable = isDone && typeof onStepClick === "function";
@@ -57,7 +57,7 @@ export default function StepIndicator({ currentStep, onStepClick }) {
                   {label}
                 </div>
               )}
-              {index < 5 && (
+              {index < 4 && (
                 <div className="flex-1 h-1 mx-2 md:mx-3 mb-5 rounded-full bg-neutral-100 overflow-hidden">
                   <div
                     className={`h-full rounded-full bg-success transition-all duration-500 ${

@@ -153,15 +153,24 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
     if (!placePrediction) return;
     const place = placePrediction.toPlace();
     try {
-      await place.fetchFields({ fields: ["formattedAddress", "location"] });
+      await place.fetchFields({ fields: ["formattedAddress", "location", "addressComponents"] });
       // Session tokens group a search-to-selection into one billable session — start a
       // fresh one now that this session is done.
       sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
       if (place.location) {
+        // "locality" is the city itself (e.g. "Mumbai"); some addresses (rural areas,
+        // certain suburbs) omit it, so administrative_area_level_2 (district) is the next
+        // best proxy for "which city/area is this in" — used to auto-detect Intra vs
+        // Inter-City by comparing pickup's city against drop's.
+        const components = place.addressComponents || [];
+        const city = components.find((c) => c.types?.includes("locality"))?.longText
+          || components.find((c) => c.types?.includes("administrative_area_level_2"))?.longText
+          || null;
         onPlaceSelect?.({
           address: stripCountrySuffix(place.formattedAddress || placePrediction.text?.text),
           lat: place.location.lat(),
           lng: place.location.lng(),
+          city,
         });
       } else {
         onChange(stripCountrySuffix(placePrediction.text?.text) || "");

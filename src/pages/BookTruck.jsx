@@ -27,16 +27,17 @@ const FALLBACK_TRUCKS = [
   { id: "part", name: "Part Load", capacity: "Shared Space", basePrice: null },
 ];
 
-
 const INITIAL_FORM = {
   transportType: null,
   city: "",
   pickup: "",
   pickupLat: null,
   pickupLng: null,
+  pickupCity: null,
   drop: "",
   dropLat: null,
   dropLng: null,
+  dropCity: null,
   weight: 1,
   quantity: 1,
   materialType: "",
@@ -54,93 +55,6 @@ function TipItem({ icon: Icon, title, children }) {
         <p className="text-sm font-semibold text-neutral-800">{title}</p>
         <p className="text-xs text-neutral-400 mt-0.5">{children}</p>
       </div>
-    </div>
-  );
-}
-
-// Lazily fetched once and reused across every mount — public/data/india-cities.json is a
-// pre-flattened, India-only extract (~4.2k cities, 176KB) of the react-country-state-city
-// package's dataset. That package's own city lookups (GetCity/GetAllCities) always fetch
-// its full *global* citiesminified.json (41.6MB, every country) from GitHub Pages on every
-// call, which is a non-starter to load in a booking flow — so the India subset is computed
-// once (see the extraction this was generated with) and shipped as a static asset instead.
-let indiaCitiesPromise = null;
-const loadIndiaCities = () => {
-  if (!indiaCitiesPromise) {
-    indiaCitiesPromise = fetch("/data/india-cities.json")
-      .then((res) => res.json())
-      .catch(() => []);
-  }
-  return indiaCitiesPromise;
-};
-
-// A search-as-you-type city picker over the full India city list, styled like
-// PlacesAutocompleteInput's suggestion list for visual consistency.
-function CityAutocompleteInput({ value, onChange, placeholder = "Search for a city" }) {
-  const [allCities, setAllCities] = useState(null); // null = still loading
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadIndiaCities().then((data) => { if (!cancelled) setAllCities(data); });
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const query = value.trim().toLowerCase();
-  const matches = !allCities ? [] : !query
-    ? allCities.slice(0, 8)
-    // Cities starting with the typed text rank above cities merely containing it —
-    // typing "pun" should surface Pune before, say, Kanpur.
-    : [
-        ...allCities.filter((c) => c.name.toLowerCase().startsWith(query)),
-        ...allCities.filter((c) => !c.name.toLowerCase().startsWith(query) && c.name.toLowerCase().includes(query)),
-      ].slice(0, 30);
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder={allCities === null ? "Loading cities..." : placeholder}
-        disabled={allCities === null}
-        autoComplete="off"
-        className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all disabled:opacity-60"
-      />
-
-      {open && matches.length > 0 && (
-        <div className="absolute z-50 left-0 right-0 mt-2 bg-white rounded-xl shadow-card border border-neutral-100 overflow-hidden">
-          <div className="max-h-64 overflow-y-auto">
-            {matches.map((city) => (
-              <button
-                key={`${city.name}-${city.state}`}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { onChange(city.name); setOpen(false); }}
-                className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm transition-colors border-b border-neutral-50 last:border-b-0 ${
-                  value === city.name ? "bg-primary-50 text-primary font-medium" : "text-neutral-700 hover:bg-neutral-50"
-                }`}
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  <MapPin className="w-3.5 h-3.5 text-neutral-300 flex-shrink-0" />
-                  <span className="truncate">{city.name}</span>
-                </span>
-                <span className="text-xs text-neutral-300 flex-shrink-0">{city.state}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -232,7 +146,7 @@ export default function BookTruck() {
   const [validatingLocation, setValidatingLocation] = useState(false);
   const [form, setForm] = useState(INITIAL_FORM);
   const [focusedField, setFocusedField] = useState(null);
-  // Set once the booking is created at Review-confirm; drives step 6 (Choose Broker), which
+  // Set once the booking is created at Review-confirm; drives the Choose Broker step, which
   // renders inline in this same wizard instead of navigating to a separate route.
   const [createdBooking, setCreatedBooking] = useState(null);
   const [locatingPickup, setLocatingPickup] = useState(false);
@@ -246,6 +160,22 @@ export default function BookTruck() {
   });
 
   const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Transport type is no longer a manual choice — it's derived from whichever cities the
+  // pickup/drop addresses resolve to: same city → Intra-City, different cities → Inter-City.
+  // Only recomputes once BOTH addresses are non-empty; if either resolved without a
+  // detectable city (free-typed text, no suggestion picked), it falls back to Inter-City
+  // rather than blocking the user indefinitely on an address Google can't classify.
+  useEffect(() => {
+    if (!form.pickup || !form.drop) return;
+    if (form.pickupCity && form.dropCity) {
+      const same = form.pickupCity.trim().toLowerCase() === form.dropCity.trim().toLowerCase();
+      setForm((prev) => ({ ...prev, transportType: same ? "intra" : "inter", city: same ? form.pickupCity : "" }));
+    } else {
+      setForm((prev) => ({ ...prev, transportType: "inter", city: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.pickup, form.drop, form.pickupCity, form.dropCity]);
 
   // Reverse-geocodes the browser's GPS position into a street address for the Pickup field —
   // uses google.maps.Geocoder (the Geocoding API, a separate Google product from Places, not
@@ -267,10 +197,16 @@ export default function BookTruck() {
         try {
           const geocoder = new window.google.maps.Geocoder();
           const { results } = await geocoder.geocode({ location: { lat: latitude, lng: longitude } });
-          const address = results?.[0]?.formatted_address?.replace(/,\s*India$/, "");
+          const result = results?.[0];
+          const address = result?.formatted_address?.replace(/,\s*India$/, "");
+          const components = result?.address_components || [];
+          const city = components.find((c) => c.types?.includes("locality"))?.long_name
+            || components.find((c) => c.types?.includes("administrative_area_level_2"))?.long_name
+            || null;
           updateForm("pickup", address || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
           updateForm("pickupLat", latitude);
           updateForm("pickupLng", longitude);
+          updateForm("pickupCity", city);
         } catch {
           toast.error("Couldn't determine your address from this location");
         } finally {
@@ -419,7 +355,7 @@ export default function BookTruck() {
         pickup: form.pickup,
         drop: form.drop,
       });
-      setStep(6);
+      setStep(5);
     } catch (err) {
       toast.error(err?.message || "Failed to confirm booking");
     } finally {
@@ -427,9 +363,9 @@ export default function BookTruck() {
     }
   };
 
-  // Gate for leaving Step 2: the backend is the source of truth on whether pickup/drop
-  // are valid for the chosen transport type (e.g. both inside the selected intra-city
-  // city) — only advance to Step 3 once it confirms that.
+  // Gate for leaving the Location step: the backend is the source of truth on whether
+  // pickup/drop are valid for the (auto-detected) transport type — only advance once it
+  // confirms that.
   const handleValidateLocation = async () => {
     setValidatingLocation(true);
     try {
@@ -442,14 +378,14 @@ export default function BookTruck() {
 
       if (!response?.success) {
         // The backend only reports a generic "Validation failed" — for an intra-city trip
-        // the near-universal cause is one of the two addresses falling outside the chosen
+        // the near-universal cause is one of the two addresses falling outside the shared
         // city, so surface that reason directly instead of the opaque backend message.
         const message = form.transportType === "intra" && form.city
           ? `Pickup and drop must both be within ${form.city} for an Intra-City booking. Please choose a location inside ${form.city}.`
           : response?.message || "These pickup/drop locations aren't valid for this trip";
         throw new Error(message);
       }
-      setStep(3);
+      setStep(2);
     } catch (err) {
       toast.error(err?.message || "These pickup/drop locations aren't valid for this trip");
     } finally {
@@ -457,7 +393,7 @@ export default function BookTruck() {
     }
   };
 
-  // The booking's already been created by the time step 6 (Choose Broker) is showing — there's
+  // The booking's already been created by the time the Choose Broker step is showing — there's
   // no safe "previous step" to rewind to (Review's Confirm button would just create a second,
   // duplicate booking). So going back from Choose Broker restarts the whole wizard fresh instead.
   const resetFlow = () => {
@@ -468,11 +404,10 @@ export default function BookTruck() {
   };
 
   const canContinue =
-    (step === 1 && !!form.transportType && (form.transportType !== "intra" || !!form.city)) ||
-    (step === 2 && !!form.pickup && !!form.drop) ||
-    step === 3 ||
-    (step === 4 && !!form.truckType) ||
-    (step === 5 && !!priceBreakdown?.total && !loadingQuote);
+    (step === 1 && !!form.pickup && !!form.drop && !!form.transportType) ||
+    step === 2 ||
+    (step === 3 && !!form.truckType) ||
+    (step === 4 && !!priceBreakdown?.total && !loadingQuote);
 
   // No success screen here anymore — creating the booking just moves on to Choose Broker.
   // "Booking Confirmed" now shows at the end of that screen, after a broker is locked in
@@ -482,8 +417,8 @@ export default function BookTruck() {
   const hasSummaryContent = form.transportType || form.pickup || form.drop || form.truckType;
 
   // Defined once and rendered in whichever column fits the step: stacked under the
-  // contextual tips panel on steps 1-4 (so there's one left column, not two mostly-empty
-  // ones), and as its own column next to the review card on step 5.
+  // contextual tips panel on steps 1-3 (so there's one left column, not two mostly-empty
+  // ones), and as its own column next to the review card on step 4 (Review).
   const bookingSummaryPanel = (
     <div className="bg-white rounded-2xl shadow-card p-5 md:p-6 lg:sticky lg:top-6">
       <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide mb-4">Booking Summary</p>
@@ -518,7 +453,7 @@ export default function BookTruck() {
             </div>
           )}
 
-          {step >= 3 && (
+          {step >= 2 && (
             <div className="pt-3 border-t border-neutral-100 space-y-1.5">
               <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-1.5">Load</p>
               <div className="flex items-center justify-between">
@@ -600,7 +535,7 @@ export default function BookTruck() {
         {/* Step Indicator */}
         <StepIndicator currentStep={step} onStepClick={createdBooking ? undefined : (s) => setStep(s)} />
 
-        {step === 6 && createdBooking ? (
+        {step === 5 && createdBooking ? (
           <ChooseBroker
             bookingId={createdBooking.id}
             bookingNumber={createdBooking.bookingNumber}
@@ -610,39 +545,26 @@ export default function BookTruck() {
             onBack={resetFlow}
           />
         ) : (
-        <div className={`grid grid-cols-1 gap-6 items-start ${step === 5 ? "lg:grid-cols-3" : "lg:grid-cols-[300px_1fr]"}`}>
+        <div className={`grid grid-cols-1 gap-6 items-start ${step === 4 ? "lg:grid-cols-3" : "lg:grid-cols-[300px_1fr]"}`}>
           {/* Left: contextual tips / trip recap stacked above the live Booking Summary — one
               column instead of a second, mostly-empty sidebar, dropped on Review where the
               full-width summary + fare column takes over instead. */}
-          {step !== 5 && (
+          {step !== 4 && (
             <div className="space-y-6">
               {step === 1 && (
-                <SidePanel title="Before you begin">
-                  <TipItem icon={Route} title="Same city or across cities">
-                    Intra-City suits local moves; Inter-City is for longer, cross-city freight.
-                  </TipItem>
-                  <TipItem icon={Zap} title="Instant pricing">
-                    Your fare estimate updates live as you complete each step.
-                  </TipItem>
-                  <TipItem icon={Truck} title="Flexible truck options">
-                    Choose from mini trucks to shared part-load on a later step.
-                  </TipItem>
-                </SidePanel>
-              )}
-              {step === 2 && (
                 <SidePanel title="Things to keep in mind">
                   <TipItem icon={Navigation} title="Accurate addresses">
                     Add complete addresses so your driver can find the location easily.
                   </TipItem>
-                  <TipItem icon={MapPin} title="Popular cities">
-                    Pick from the quick city list or search any address directly.
+                  <TipItem icon={Route} title="We detect the trip type">
+                    Same city for pickup and drop = Intra-City; different cities = Inter-City — no need to pick it yourself.
                   </TipItem>
                   <TipItem icon={ArrowUpDown} title="Swap in one tap">
                     Use the swap button to flip pickup and drop instantly.
                   </TipItem>
                 </SidePanel>
               )}
-              {step === 3 && (
+              {step === 2 && (
                 <SidePanel title="Package guidelines">
                   <TipItem icon={Weight} title="Weight matters">
                     Accurate weight helps us suggest the right vehicle and fare.
@@ -655,107 +577,28 @@ export default function BookTruck() {
                   </TipItem>
                 </SidePanel>
               )}
-              {/* No step-4 tips panel: the Booking Summary right below already shows the
-                  route, load and (once picked) truck — a second recap would just repeat it. */}
+              {/* No step-3 (Truck) tips panel: the Booking Summary right below already shows
+                  the route, load and (once picked) truck — a second recap would just repeat it. */}
               {bookingSummaryPanel}
             </div>
           )}
 
           {/* Center: Form */}
-          <div className={step === 5 ? "lg:col-span-2" : ""}>
+          <div className={step === 4 ? "lg:col-span-2" : ""}>
             <div className="bg-white rounded-2xl shadow-card p-5 md:p-8">
-              {/* Step 1 - Transport Type */}
+              {/* Step 1 - Location (pickup/drop; transport type is auto-detected from the
+                  two cities, not chosen here) */}
               {step === 1 && (
                 <div>
-                  <h2 className="font-poppins font-semibold text-lg md:text-xl text-neutral-800 mb-1">
-                    Select Transport Type
-                  </h2>
-                  <p className="text-sm text-neutral-400 mb-6">Choose the type of transport service you need</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <button
-                      onClick={() => updateForm("transportType", "intra")}
-                      className={`flex items-start gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left active:scale-[0.98] ${
-                        form.transportType === "intra"
-                          ? "border-primary bg-primary-50 shadow-glow-blue"
-                          : "border-neutral-100 bg-neutral-50 hover:border-neutral-200 hover:bg-white hover:shadow-card"
-                      }`}
-                    >
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-                        form.transportType === "intra" ? "bg-primary/15" : "bg-white"
-                      }`}>
-                        <Building2 className="w-6 h-6 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-poppins font-semibold text-base text-neutral-800">Intra-City</h3>
-                        <p className="text-xs text-neutral-400 mt-1">Transport within the same city</p>
-                      </div>
-                      {form.transportType === "intra" && (
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-white" />
-                        </div>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={() => updateForm("transportType", "inter")}
-                      className={`flex items-start gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left active:scale-[0.98] ${
-                        form.transportType === "inter"
-                          ? "border-success bg-green-50 shadow-glow-green"
-                          : "border-neutral-100 bg-neutral-50 hover:border-neutral-200 hover:bg-white hover:shadow-card"
-                      }`}
-                    >
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-                        form.transportType === "inter" ? "bg-success/15" : "bg-white"
-                      }`}>
-                        <Route className="w-6 h-6 text-success" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-poppins font-semibold text-base text-neutral-800">Inter-City</h3>
-                        <p className="text-xs text-neutral-400 mt-1">Transport between different cities</p>
-                      </div>
-                      {form.transportType === "inter" && (
-                        <div className="w-5 h-5 rounded-full bg-success flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-white" />
-                        </div>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Only intra-city trips need this — inter-city pickup/drop can be any two
-                      cities, so there's nothing to pin down here. Picking the city up front
-                      lets Step 2 restrict the address search to it (see restrictToCity below). */}
-                  {form.transportType === "intra" && (
-                    <div className="mt-5">
-                      <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
-                        Select City
-                      </label>
-                      <CityAutocompleteInput
-                        value={form.city}
-                        onChange={(city) => updateForm("city", city)}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 2 - Pickup & Drop */}
-              {step === 2 && (
-                <div>
-                  <button
-                    onClick={() => setStep(1)}
-                    className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
-                  >
-                    <ArrowLeft className="w-4 h-4" /> Back
-                  </button>
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">
                     Where should we pick up and deliver?
                   </h2>
-                  <p className="text-sm text-neutral-400 mb-6">Add accurate addresses to help your driver reach you on time.</p>
+                  <p className="text-sm text-neutral-400 mb-6">Add accurate addresses — we'll work out Intra vs Inter-City automatically.</p>
 
                   {/* Pickup/drop entry: a connected rail (dot → dashed line → pin) mirrors the
                       route itself, so the two fields read as one trip instead of two unrelated
                       boxes — the same visual language as most ride-hailing/logistics apps. */}
-                  <div className="flex gap-3 mb-6">
+                  <div className="flex gap-3 mb-4">
                     <div className="flex flex-col items-center pt-8 pb-8 flex-shrink-0 w-4">
                       {/* Blue pickup / green drop matches MapView's own marker colors (see
                           RouteRenderer below and TrackShipment's map) — same trip, same colors. */}
@@ -791,15 +634,16 @@ export default function BookTruck() {
                               updateForm("pickup", v);
                               updateForm("pickupLat", null);
                               updateForm("pickupLng", null);
+                              updateForm("pickupCity", null);
                             }}
-                            onPlaceSelect={({ address, lat, lng }) => {
+                            onPlaceSelect={({ address, lat, lng, city }) => {
                               updateForm("pickup", address);
                               updateForm("pickupLat", lat);
                               updateForm("pickupLng", lng);
+                              updateForm("pickupCity", city);
                             }}
-                            restrictToCity={form.transportType === "intra" ? form.city : null}
                             inputProps={{ onFocus: () => setFocusedField("pickup") }}
-                            placeholder={form.transportType === "intra" && form.city ? `Enter pickup address in ${form.city}` : "Enter pickup address or city"}
+                            placeholder="Enter pickup address or city"
                             className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                           />
                         </div>
@@ -816,15 +660,16 @@ export default function BookTruck() {
                               updateForm("drop", v);
                               updateForm("dropLat", null);
                               updateForm("dropLng", null);
+                              updateForm("dropCity", null);
                             }}
-                            onPlaceSelect={({ address, lat, lng }) => {
+                            onPlaceSelect={({ address, lat, lng, city }) => {
                               updateForm("drop", address);
                               updateForm("dropLat", lat);
                               updateForm("dropLng", lng);
+                              updateForm("dropCity", city);
                             }}
-                            restrictToCity={form.transportType === "intra" ? form.city : null}
                             inputProps={{ onFocus: () => setFocusedField("drop") }}
-                            placeholder={form.transportType === "intra" && form.city ? `Enter drop address in ${form.city}` : "Enter drop address or city"}
+                            placeholder="Enter drop address or city"
                             className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
                           />
                         </div>
@@ -839,9 +684,11 @@ export default function BookTruck() {
                             pickup: prev.drop,
                             pickupLat: prev.dropLat,
                             pickupLng: prev.dropLng,
+                            pickupCity: prev.dropCity,
                             drop: prev.pickup,
                             dropLat: prev.pickupLat,
                             dropLng: prev.pickupLng,
+                            dropCity: prev.pickupCity,
                           }));
                         }}
                         className="w-9 h-9 md:w-10 md:h-10 rounded-full border border-primary bg-white flex items-center justify-center hover:bg-primary-50 transition-colors"
@@ -851,9 +698,25 @@ export default function BookTruck() {
                     </div>
                   </div>
 
-                  {/* Intra-city trips already locked in a single city on Step 1 — a
-                      city-picker chip row here would be redundant, so it's inter-city only. */}
-                  {form.transportType !== "intra" && (
+                  {/* Auto-detected once both addresses are known — this replaces the old
+                      manual Intra-City/Inter-City choice entirely. */}
+                  {form.transportType && (
+                    <div className={`flex items-center gap-2.5 mb-5 px-3.5 py-2.5 rounded-lg border ${
+                      form.transportType === "intra" ? "border-primary/20 bg-primary-50" : "border-success/20 bg-green-50"
+                    }`}>
+                      {form.transportType === "intra" ? (
+                        <Building2 className="w-4 h-4 text-primary flex-shrink-0" />
+                      ) : (
+                        <Route className="w-4 h-4 text-success flex-shrink-0" />
+                      )}
+                      <p className={`text-sm font-medium ${form.transportType === "intra" ? "text-primary" : "text-success"}`}>
+                        {form.transportType === "intra"
+                          ? `Intra-City trip${form.city ? ` — both ends are in ${form.city}` : ""}`
+                          : "Inter-City trip — pickup and drop are in different cities"}
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-3">Popular Cities</p>
                     <div className="flex flex-wrap gap-2">
@@ -863,6 +726,9 @@ export default function BookTruck() {
                           onClick={() => {
                             const target = focusedField === "drop" || (!form.pickup && focusedField !== "pickup") ? "drop" : "pickup";
                             updateForm(target, city);
+                            // A city chip already tells us the address's city directly — no
+                            // geocoding needed to know pickupCity/dropCity for this one.
+                            updateForm(target === "drop" ? "dropCity" : "pickupCity", city);
                             // Coordinates are only known once resolved via Autocomplete/geocoding — a
                             // quick city-chip pick doesn't carry them, so clear any stale lat/lng.
                             updateForm(target === "drop" ? "dropLat" : "pickupLat", null);
@@ -879,15 +745,14 @@ export default function BookTruck() {
                       ))}
                     </div>
                   </div>
-                  )}
                 </div>
               )}
 
-              {/* Step 3 - Load Information */}
-              {step === 3 && (
+              {/* Step 2 - Load Information */}
+              {step === 2 && (
                 <div>
                   <button
-                    onClick={() => setStep(2)}
+                    onClick={() => setStep(1)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
@@ -1019,11 +884,11 @@ export default function BookTruck() {
                 </div>
               )}
 
-              {/* Step 4 - Select Truck */}
-              {step === 4 && (
+              {/* Step 3 - Select Truck */}
+              {step === 3 && (
                 <div>
                   <button
-                    onClick={() => setStep(3)}
+                    onClick={() => setStep(2)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
@@ -1059,7 +924,7 @@ export default function BookTruck() {
                     ))}
                   </div>
 
-                  {console.log("[BookTruck] Step 4 location values:", {
+                  {console.log("[BookTruck] Truck step location values:", {
                     pickup: form.pickup, pickupLat: form.pickupLat, pickupLng: form.pickupLng,
                     drop: form.drop, dropLat: form.dropLat, dropLng: form.dropLng,
                   })}
@@ -1074,11 +939,11 @@ export default function BookTruck() {
                 </div>
               )}
 
-              {/* Step 5 - Review & Pay */}
-              {step === 5 && (
+              {/* Step 4 - Review & Pay */}
+              {step === 4 && (
                 <div>
                   <button
-                    onClick={() => setStep(4)}
+                    onClick={() => setStep(3)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
@@ -1095,7 +960,7 @@ export default function BookTruck() {
                             {form.transportType === "intra" ? "Intra-City" : "Inter-City"}
                           </span>
                           <button
-                            onClick={() => setStep(2)}
+                            onClick={() => setStep(1)}
                             className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
                           >
                             <Pencil className="w-3 h-3" /> Edit
@@ -1123,7 +988,7 @@ export default function BookTruck() {
                           <span className="flex items-center gap-2">
                             <span className="text-xs font-medium text-neutral-700">{truck?.name}</span>
                             <button
-                              onClick={() => setStep(4)}
+                              onClick={() => setStep(3)}
                               className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
                             >
                               <Pencil className="w-3 h-3" /> Edit
@@ -1170,15 +1035,15 @@ export default function BookTruck() {
               )}
               <button
                 onClick={() => {
-                  if (step === 2) handleValidateLocation();
-                  else if (step < 5) setStep(step + 1);
+                  if (step === 1) handleValidateLocation();
+                  else if (step < 4) setStep(step + 1);
                   else handleConfirm();
                 }}
                 disabled={!canContinue || confirming || validatingLocation}
                 className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
               >
-                {step === 5 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
-                  : step === 2 ? (validatingLocation ? "Validating..." : "Continue")
+                {step === 4 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
+                  : step === 1 ? (validatingLocation ? "Validating..." : "Continue")
                   : "Continue"}
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
               </button>
@@ -1187,7 +1052,7 @@ export default function BookTruck() {
 
           {/* Right: Live Booking Summary — only its own column on Review, where there's no
               left tips panel to stack it under instead. */}
-          {step === 5 && (
+          {step === 4 && (
             <div className="lg:col-span-1">
               {bookingSummaryPanel}
             </div>
