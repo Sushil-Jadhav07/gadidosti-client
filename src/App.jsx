@@ -6,6 +6,7 @@ import BottomNav from "./components/BottomNav";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
+import usePushNotifications from "./hooks/usePushNotifications";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Home from "./pages/Home";
@@ -74,6 +75,10 @@ function PublicRoute({ children }) {
 }
 
 function AppRoutes() {
+  // Registers this device for push once authenticated, for the lifetime of the app — not
+  // scoped to any one route, so it lives here rather than inside a specific page.
+  usePushNotifications();
+
   return (
     <Routes>
       <Route

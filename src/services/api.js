@@ -23,10 +23,11 @@ const getFileBlobUrl = async (url, token) => {
 };
 
 export const api = {
-  post:  (path, body, token) => request('POST',  path, body, token),
-  get:   (path, token)       => request('GET',   path, null, token),
-  put:   (path, body, token) => request('PUT',   path, body, token),
-  patch: (path, body, token) => request('PATCH', path, body, token),
+  post:   (path, body, token) => request('POST',   path, body, token),
+  get:    (path, token)       => request('GET',    path, null, token),
+  put:    (path, body, token) => request('PUT',    path, body, token),
+  patch:  (path, body, token) => request('PATCH',  path, body, token),
+  delete: (path, body, token) => request('DELETE', path, body, token),
   getFileBlobUrl,
 };
 

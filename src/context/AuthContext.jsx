@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { api } from "../services/api";
+import { getStoredFcmToken, clearStoredFcmToken } from "../utils";
 
 const AuthContext = createContext(null);
 
@@ -75,9 +76,16 @@ export function AuthProvider({ children }) {
   // fired in the background; it doesn't need to block the user from being signed out.
   const logout = useCallback(async () => {
     const tokens = session?.tokens;
+    const fcmToken = getStoredFcmToken();
     clearSession();
     if (tokens) {
       api.post("/api/auth/logout", { refresh_token: tokens.refresh_token }, tokens.access_token).catch(() => {});
+      // Best-effort, same as the /api/auth/logout call above — read while the access token
+      // (captured above, before clearSession) is still valid to authenticate the request.
+      if (fcmToken) {
+        api.delete("/api/users/device-token", { token: fcmToken }, tokens.access_token).catch(() => {});
+        clearStoredFcmToken();
+      }
     }
   }, [session, clearSession]);
 

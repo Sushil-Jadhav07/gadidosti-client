@@ -67,6 +67,25 @@ export const clearStoredDriverRequestId = (bookingId) => {
   try { localStorage.removeItem(driverRequestStorageKey(bookingId)); } catch { /* ignore */ }
 };
 
+// Holds this device's current FCM push token (see src/lib/firebase.js and
+// usePushNotifications) so AuthContext's logout() can unregister it (DELETE
+// /api/users/device-token) without the hook and the auth context needing to know about
+// each other directly.
+const FCM_TOKEN_STORAGE_KEY = "ssk_fcm_token";
+
+export const getStoredFcmToken = () => {
+  try { return localStorage.getItem(FCM_TOKEN_STORAGE_KEY); } catch { return null; }
+};
+
+export const setStoredFcmToken = (token) => {
+  if (!token) return;
+  try { localStorage.setItem(FCM_TOKEN_STORAGE_KEY, token); } catch { /* ignore */ }
+};
+
+export const clearStoredFcmToken = () => {
+  try { localStorage.removeItem(FCM_TOKEN_STORAGE_KEY); } catch { /* ignore */ }
+};
+
 export const adaptBooking = (booking) => {
   if (!booking) return null;
   const timeline = Array.isArray(booking.timeline) ? booking.timeline.map(formatBookingStatus) : [];
