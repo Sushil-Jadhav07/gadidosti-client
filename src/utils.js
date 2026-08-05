@@ -45,6 +45,28 @@ export const formatDate = (value) => {
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
+// Bridges a booking to its in-flight direct-driver request (POST /api/bookings/:id/request-truck).
+// There's no backend endpoint to look up "the driver request for booking X" as a client (only
+// GET /api/driver-requests/:id by the request's own id, or driver/broker-scoped list endpoints) —
+// so the id is stashed here the moment BookTruck.jsx creates it, and MyBookings.jsx reads it back
+// to resume polling/negotiating if the user navigates away and returns via the bookings list.
+const driverRequestStorageKey = (bookingId) => `ssk_driver_request_${bookingId}`;
+
+export const getStoredDriverRequestId = (bookingId) => {
+  if (!bookingId) return null;
+  try { return localStorage.getItem(driverRequestStorageKey(bookingId)); } catch { return null; }
+};
+
+export const setStoredDriverRequestId = (bookingId, requestId) => {
+  if (!bookingId || !requestId) return;
+  try { localStorage.setItem(driverRequestStorageKey(bookingId), requestId); } catch { /* ignore */ }
+};
+
+export const clearStoredDriverRequestId = (bookingId) => {
+  if (!bookingId) return;
+  try { localStorage.removeItem(driverRequestStorageKey(bookingId)); } catch { /* ignore */ }
+};
+
 export const adaptBooking = (booking) => {
   if (!booking) return null;
   const timeline = Array.isArray(booking.timeline) ? booking.timeline.map(formatBookingStatus) : [];

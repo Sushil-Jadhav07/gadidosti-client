@@ -9,9 +9,10 @@ import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
 import NearbyTrucksMap from "../components/NearbyTrucksMap";
 import ChooseBroker from "./ChooseBroker";
+import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-import { bookingRef } from "../utils";
+import { bookingRef, setStoredDriverRequestId } from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
@@ -43,6 +44,7 @@ const INITIAL_FORM = {
   notes: "",
   truckType: null,
   selectedTruckId: null,
+  selectedTruckReg: null,
 };
 
 // A custom-styled, type-to-filter dropdown for Material Type, replacing the native
@@ -74,19 +76,19 @@ function MaterialTypeInput({ options, value, onChange, placeholder }) {
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
         autoComplete="off"
-        className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all"
+        className="w-full bg-neutral-50 border border-neutral-100 rounded-md px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all"
       />
 
       {open && matches.length > 0 && (
-        <div className="absolute z-50 left-0 right-0 mt-2 bg-white rounded-xl shadow-card border border-neutral-100 overflow-hidden">
-          <div className="max-h-56 overflow-y-auto">
+        <div className="absolute z-50 left-0 right-0 mt-1.5 bg-white rounded-lg shadow-card border border-neutral-100 overflow-hidden">
+          <div className="max-h-48 overflow-y-auto">
             {matches.map((option) => (
               <button
                 key={option}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onChange(option); setOpen(false); }}
-                className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors border-b border-neutral-50 last:border-b-0 ${
+                className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors border-b border-neutral-50 last:border-b-0 ${
                   value === option ? "bg-primary-50 text-primary font-medium" : "text-neutral-700 hover:bg-neutral-50"
                 }`}
               >
@@ -126,6 +128,14 @@ export default function BookTruck() {
   // Set once the booking is created at Review-confirm; drives the Choose Broker step, which
   // renders inline in this same wizard instead of navigating to a separate route.
   const [createdBooking, setCreatedBooking] = useState(null);
+  // Result of POST /api/bookings/:id/request-truck, when a specific truck was picked in Step 3 —
+  // set right after booking creation, drives RequestDriver instead of ChooseBroker for step 5
+  // until/unless the direct-driver attempt is abandoned (see showBrokerFallback below).
+  const [driverRequest, setDriverRequest] = useState(null);
+  // Flipped once the direct-driver request is declined, times out and the client gives up
+  // waiting, or the client explicitly skips it — switches step 5 over to the broker-broadcast
+  // flow, which was already kicked off automatically when the booking was created either way.
+  const [showBrokerFallback, setShowBrokerFallback] = useState(false);
   const [locatingPickup, setLocatingPickup] = useState(false);
 
   // Loaded here (not just inside PlacesAutocompleteInput) so "Use my current location" knows
@@ -248,7 +258,7 @@ export default function BookTruck() {
         // defaulting to "no surge" (see PricingModel.estimate).
         const durationMin = distanceRes.data?.durationMin;
         const durationInTrafficMin = distanceRes.data?.durationInTrafficMin;
-        const pricingRes = await api.post("/api/pricing/estimate", {
+        const pricingRes = await api.post("/api/bookings/quote", {
           truck_category: form.truckType,
           transport_type: form.transportType,
           distance,
@@ -281,11 +291,12 @@ export default function BookTruck() {
   // happens per-broker on the Choose Broker screen (counter-offers), not at booking time.
   const finalAmount = priceBreakdown?.total;
 
-  // Booking is created here, at Review-confirm — *before* a broker is chosen and *before*
-  // payment. Both of those happen next, on the Choose Broker screen, using the id this
-  // returns. payment_status starts 'pending' regardless of what the client intends to do
-  // later; PATCH /api/bookings/:id/pay is what actually records payment, once a broker's
-  // locked in.
+  // Booking is created here, at Review-confirm — *before* a broker or driver is locked in.
+  // POST /api/bookings already broadcasts it to brokers automatically. If a specific truck was
+  // also picked in Step 3, request-truck sends that truck's driver a direct request in parallel
+  // — whichever responds and gets accepted first wins; the other side finds out via a 409 on its
+  // own accept attempt. payment_status starts 'pending' regardless of what the client intends to
+  // do later.
   const handleConfirm = async () => {
     if (!priceBreakdown?.total) {
       toast.error("Price quote isn't ready yet — please wait a moment and try again.");
@@ -332,6 +343,25 @@ export default function BookTruck() {
         pickup: form.pickup,
         drop: form.drop,
       });
+
+      // A specific truck was picked in Step 3 — try that driver directly before falling back
+      // to whatever brokers respond with. Failure here (truck taken in the meantime, etc.) is
+      // non-fatal: the booking already exists and was already broadcast to brokers, so step 5
+      // just shows the broker flow instead.
+      if (form.selectedTruckId && booking?.id) {
+        try {
+          const requestRes = await api.post(`/api/bookings/${booking.id}/request-truck`, {
+            truck_id: form.selectedTruckId,
+          }, token);
+          if (requestRes?.success && requestRes.data?.request) {
+            setDriverRequest(requestRes.data.request);
+            setStoredDriverRequestId(booking.id, requestRes.data.request.id);
+          }
+        } catch {
+          // Fall through to the broker flow below.
+        }
+      }
+
       setStep(5);
     } catch (err) {
       toast.error(err?.message || "Failed to confirm booking");
@@ -376,6 +406,8 @@ export default function BookTruck() {
   const resetFlow = () => {
     setStep(1);
     setCreatedBooking(null);
+    setDriverRequest(null);
+    setShowBrokerFallback(false);
     setForm(INITIAL_FORM);
     setPriceBreakdown(null);
   };
@@ -510,7 +542,18 @@ export default function BookTruck() {
         {/* Step Indicator */}
         <StepIndicator currentStep={step} onStepClick={createdBooking ? undefined : (s) => setStep(s)} />
 
-        {step === 5 && createdBooking ? (
+        {step === 5 && createdBooking && driverRequest && !showBrokerFallback ? (
+          <RequestDriver
+            bookingId={createdBooking.id}
+            bookingNumber={createdBooking.bookingNumber}
+            askingPrice={createdBooking.askingPrice}
+            pickup={createdBooking.pickup}
+            drop={createdBooking.drop}
+            initialRequest={driverRequest}
+            onBack={resetFlow}
+            onFallbackToBrokers={() => setShowBrokerFallback(true)}
+          />
+        ) : step === 5 && createdBooking ? (
           <ChooseBroker
             bookingId={createdBooking.id}
             bookingNumber={createdBooking.bookingNumber}
@@ -692,47 +735,40 @@ export default function BookTruck() {
                 <div className="animate-page-enter">
                   <button
                     onClick={() => setStep(1)}
-                    className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
+                    className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-3"
                   >
-                    <ArrowLeft className="w-4 h-4" /> Back
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back
                   </button>
-                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Tell us about your package</h2>
-                  <p className="text-sm text-neutral-400 mb-4">Accurate details help us suggest the right vehicle and fare.</p>
+                  <h2 className="font-poppins font-bold text-lg md:text-xl text-neutral-800 mb-1">Load details</h2>
+                  <p className="text-xs md:text-sm text-neutral-400 mb-5">A quick overview — helps us match the right truck.</p>
 
-                  {/* Package category — free text, suggestions driven by the admin-configured
-                      materialTypes list (never a hardcoded set). */}
-                  <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors mb-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                        <Package className="w-3.5 h-3.5 text-primary" />
-                      </span>
-                      <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Material Type</label>
-                    </div>
-                    <MaterialTypeInput
-                      options={materialTypes}
-                      value={form.materialType}
-                      onChange={(v) => updateForm("materialType", v)}
-                      placeholder="e.g. Electronics, Furniture, Textiles..."
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
-                    {/* Weight */}
-                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
+                  <div className="border border-neutral-100 rounded-xl overflow-hidden divide-y divide-neutral-50">
+                    {/* Material Type */}
+                    <div className="p-3 md:p-3.5">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <Weight className="w-3.5 h-3.5 text-primary" />
+                        <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
+                          <Package className="w-3 h-3 text-primary" />
                         </span>
-                        <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Weight (Tons)</label>
+                        <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">Material Type</label>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateForm("weight", Math.max(0.5, Number((form.weight - 0.5).toFixed(1))))}
-                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
-                        >
-                          −
-                        </button>
-                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1 px-2 text-center">
+                      <MaterialTypeInput
+                        options={materialTypes}
+                        value={form.materialType}
+                        onChange={(v) => updateForm("materialType", v)}
+                        placeholder="e.g. Electronics, Furniture, Textiles..."
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-neutral-50">
+                      {/* Weight */}
+                      <div className="p-3 md:p-3.5">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <Weight className="w-3 h-3 text-primary" />
+                          </span>
+                          <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">Weight (Tons)</label>
+                        </div>
+                        <div className="relative">
                           <input
                             type="number"
                             min={0.5}
@@ -743,36 +779,25 @@ export default function BookTruck() {
                               const v = parseFloat(e.target.value);
                               updateForm("weight", Number.isNaN(v) ? 0.5 : Math.min(50, Math.max(0.5, v)));
                             }}
-                            className="w-full bg-transparent text-center font-poppins font-bold text-lg text-neutral-800 outline-none tabular-nums"
+                            placeholder="0.5"
+                            className="w-full bg-neutral-50 border border-neutral-100 rounded-md px-2.5 py-2 pr-12 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all tabular-nums"
                           />
-                          <p className="text-[10px] text-neutral-400">Tons</p>
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-neutral-400 pointer-events-none">
+                            Tons
+                          </span>
                         </div>
-                        <button
-                          onClick={() => updateForm("weight", Math.min(50, Number((form.weight + 0.5).toFixed(1))))}
-                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
-                        >
-                          +
-                        </button>
+                        <p className="text-[9px] text-neutral-300 mt-1.5">Recommended: 2–5 Tons</p>
                       </div>
-                      <p className="text-[10px] text-neutral-300 mt-1.5">Recommended: 2–5 Tons</p>
-                    </div>
 
-                    {/* Quantity */}
-                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <Hash className="w-3.5 h-3.5 text-primary" />
-                        </span>
-                        <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Number of Items</label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateForm("quantity", Math.max(1, form.quantity - 1))}
-                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
-                        >
-                          −
-                        </button>
-                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1 px-2 text-center">
+                      {/* Quantity */}
+                      <div className="p-3 md:p-3.5">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <Hash className="w-3 h-3 text-primary" />
+                          </span>
+                          <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">Items</label>
+                        </div>
+                        <div className="relative">
                           <input
                             type="number"
                             min={1}
@@ -783,40 +808,37 @@ export default function BookTruck() {
                               const v = parseInt(e.target.value, 10);
                               updateForm("quantity", Number.isNaN(v) ? 1 : Math.min(100, Math.max(1, v)));
                             }}
-                            className="w-full bg-transparent text-center font-poppins font-bold text-lg text-neutral-800 outline-none tabular-nums"
+                            placeholder="1"
+                            className="w-full bg-neutral-50 border border-neutral-100 rounded-md px-2.5 py-2 pr-14 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all tabular-nums"
                           />
-                          <p className="text-[10px] text-neutral-400">items</p>
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-medium text-neutral-400 pointer-events-none">
+                            pieces
+                          </span>
                         </div>
-                        <button
-                          onClick={() => updateForm("quantity", Math.min(100, form.quantity + 1))}
-                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
-                        >
-                          +
-                        </button>
                       </div>
-                    </div>
 
-                    {/* Notes */}
-                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <ClipboardList className="w-3.5 h-3.5 text-primary" />
-                        </span>
-                        <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-                          Notes <span className="text-neutral-300 normal-case font-normal">(Optional)</span>
-                        </label>
-                      </div>
-                      <div className="relative">
-                        <textarea
-                          value={form.notes}
-                          onChange={(e) => updateForm("notes", e.target.value.slice(0, 200))}
-                          placeholder="Any special instructions..."
-                          rows={2}
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all resize-none"
-                        />
-                        <span className="absolute bottom-1.5 right-2.5 text-[10px] text-neutral-300">
-                          {form.notes.length}/200
-                        </span>
+                      {/* Notes */}
+                      <div className="p-3 md:p-3.5">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <ClipboardList className="w-3 h-3 text-primary" />
+                          </span>
+                          <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">
+                            Notes <span className="text-neutral-300 normal-case font-normal">(Optional)</span>
+                          </label>
+                        </div>
+                        <div className="relative">
+                          <textarea
+                            value={form.notes}
+                            onChange={(e) => updateForm("notes", e.target.value.slice(0, 200))}
+                            placeholder="Special instructions..."
+                            rows={2}
+                            className="w-full bg-neutral-50 border border-neutral-100 rounded-md px-2 py-1.5 text-xs text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all resize-none"
+                          />
+                          <span className="absolute bottom-1 right-2 text-[9px] text-neutral-300">
+                            {form.notes.length}/200
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -847,6 +869,7 @@ export default function BookTruck() {
                     onSelectTruck={(t) => {
                       updateForm("selectedTruckId", t.id);
                       updateForm("truckType", t.category);
+                      updateForm("selectedTruckReg", t.registration);
                     }}
                   />
                 </div>

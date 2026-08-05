@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, Check, Package, Download, XCircle, Truck, Copy, User, Building2,
-  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import StatusBadge from "../components/StatusBadge";
@@ -10,7 +10,7 @@ import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
+import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
 
 const FILTER_TABS = ["All", "Active", "In Transit", "Delivered", "Cancelled"];
 const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
@@ -518,6 +518,220 @@ function InfoTile({ icon: Icon, label, name, sub, tint = "primary" }) {
 // sheet is open since offers arrive in near real time, not on a client action.
 const OFFERS_POLL_INTERVAL_MS = 6000;
 
+// Direct-driver negotiation panel — shown above the broker OffersPanel below when this booking
+// also has an in-flight POST /api/bookings/:id/request-truck attempt (started from BookTruck.jsx's
+// Step 3 truck pick). There's no backend endpoint to look up "the driver request for booking X"
+// as a client (only GET /api/driver-requests/:id by the request's own id) — so the id is read
+// back from localStorage (see utils.js's getStoredDriverRequestId), which BookTruck.jsx stashes
+// there the moment the request is created. Renders nothing if no such id is stored, i.e. this
+// booking never had a specific truck requested directly.
+function DriverRequestPanel({ booking, onAccepted }) {
+  const toast = useToast();
+  const token = getToken();
+  const requestId = getStoredDriverRequestId(booking.id);
+
+  const [request, setRequest] = useState(null);
+  const [loading, setLoading] = useState(!!requestId);
+  const [gone, setGone] = useState(!requestId);
+  const [acting, setActing] = useState(false);
+  const [counterOpen, setCounterOpen] = useState(false);
+  const [counterAmount, setCounterAmount] = useState("");
+
+  const load = async () => {
+    try {
+      const res = await api.get(`/api/driver-requests/${requestId}`, token);
+      if (!res?.success || !res.data?.request) {
+        clearStoredDriverRequestId(booking.id);
+        setGone(true);
+        return;
+      }
+      setRequest(res.data.request);
+      if (res.data.request.status === "declined") {
+        clearStoredDriverRequestId(booking.id);
+      }
+    } catch {
+      /* silent — next poll retries */
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!requestId) return;
+    load();
+    const interval = setInterval(() => {
+      if (request?.status !== "accepted" && request?.status !== "declined") load();
+    }, OFFERS_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId]);
+
+  const handleAccept = async () => {
+    setActing(true);
+    try {
+      const res = await api.patch(`/api/driver-requests/${requestId}/client-accept`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to confirm this driver");
+      clearStoredDriverRequestId(booking.id);
+      toast.success("Confirmed with this driver!");
+      await onAccepted?.();
+    } catch (err) {
+      toast.error(err?.message || "Failed to confirm this driver");
+      setActing(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setActing(true);
+    try {
+      const res = await api.patch(`/api/driver-requests/${requestId}/client-reject`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to decline");
+      clearStoredDriverRequestId(booking.id);
+      setGone(true);
+      toast.info("Declined — see broker offers below");
+    } catch (err) {
+      toast.error(err?.message || "Failed to decline");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const submitCounter = async () => {
+    const amount = Number(counterAmount);
+    if (!amount || amount <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    setActing(true);
+    try {
+      const res = await api.patch(`/api/driver-requests/${requestId}/client-counter`, { amount }, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to send counter-offer");
+      if (res.data?.request) setRequest(res.data.request);
+      toast.success("Counter-offer sent");
+      setCounterOpen(false);
+    } catch (err) {
+      toast.error(err?.message || "Failed to send counter-offer");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  if (gone || (!loading && !request) || request?.status === "accepted" || request?.status === "declined") return null;
+
+  return (
+    <div className="bg-neutral-50 rounded-lg p-3 mb-4">
+      <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+        <Truck className="w-3.5 h-3.5" /> Direct Driver Request
+      </p>
+
+      {loading ? (
+        <p className="text-xs text-neutral-400 py-2">Loading request status...</p>
+      ) : (
+        <div className="bg-white rounded-lg p-3 border border-neutral-100">
+          <div className="flex items-center justify-between mb-1.5 gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-neutral-700 truncate">{request.driverName || "Driver"}{request.truckReg ? ` · ${request.truckReg}` : ""}</p>
+              {request.driverPhone && (
+                <p className="text-[11px] text-neutral-400 flex items-center gap-1"><Phone className="w-3 h-3" />{request.driverPhone}</p>
+              )}
+            </div>
+            <p className="font-poppins font-bold text-primary whitespace-nowrap">₹{Number(request.amount || 0).toLocaleString("en-IN")}</p>
+          </div>
+
+          {request.status === "countered" ? (
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={handleAccept}
+                disabled={acting}
+                className="flex-1 py-1.5 text-xs font-semibold bg-success text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => { setCounterOpen(true); setCounterAmount(String(request.amount || "")); }}
+                disabled={acting}
+                className="flex-1 py-1.5 text-xs font-semibold border border-primary/30 text-primary rounded-md hover:bg-primary-50 transition-colors disabled:opacity-50"
+              >
+                Counter
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={acting}
+                className="flex-1 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors disabled:opacity-50"
+              >
+                Reject
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2">
+              <p className="text-[11px] text-neutral-400 mb-2">
+                <Clock3 className="w-3 h-3 inline mr-1" />
+                {request.driverTimedOut ? "No response yet — their broker has been notified" : "Waiting for the driver to respond"}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleAccept}
+                  disabled={acting}
+                  className="flex-1 py-1.5 text-xs font-semibold bg-success text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  Confirm Now
+                </button>
+                <button
+                  onClick={() => { setCounterOpen(true); setCounterAmount(String(request.amount || "")); }}
+                  disabled={acting}
+                  className="flex-1 py-1.5 text-xs font-semibold border border-primary/30 text-primary rounded-md hover:bg-primary-50 transition-colors disabled:opacity-50"
+                >
+                  <Tag className="w-3 h-3 inline mr-1" /> Propose Price
+                </button>
+              </div>
+            </div>
+          )}
+
+          {counterOpen && (
+            <div className="mt-2.5 pt-2.5 border-t border-neutral-100">
+              <p className="text-[11px] font-semibold text-neutral-500 mb-1.5">Your offer</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={counterAmount}
+                  onChange={(e) => setCounterAmount(e.target.value)}
+                  className="flex-1 rounded-md border border-neutral-200 px-2.5 py-1.5 text-sm text-neutral-700 outline-none focus:border-primary min-w-0"
+                />
+                <button
+                  onClick={submitCounter}
+                  disabled={acting}
+                  className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-md hover:bg-primary-dark transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  Send
+                </button>
+                <button
+                  onClick={() => setCounterOpen(false)}
+                  className="px-3 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {request.offerHistory?.length > 1 && (
+            <details className="mt-2">
+              <summary className="text-[11px] text-neutral-400 cursor-pointer select-none">Negotiation history ({request.offerHistory.length})</summary>
+              <div className="mt-1.5 space-y-1">
+                {request.offerHistory.map((entry, i) => (
+                  <p key={i} className="text-[11px] text-neutral-400">
+                    {entry.by === "client" ? "You" : entry.by === "broker" ? "Broker" : "Driver"} offered <span className="font-medium text-neutral-600">₹{Number(entry.amount || 0).toLocaleString("en-IN")}</span>
+                  </p>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OffersPanel({ booking, onAccepted }) {
   const toast = useToast();
   const token = getToken();
@@ -818,9 +1032,15 @@ function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeN
         )}
       </div>
 
-      {/* Broker Offers — negotiation is only live while the booking is still awaiting a broker */}
+      {/* Direct-driver request + Broker Offers — negotiation is only live while the booking is
+          still awaiting a broker/driver. The direct-driver panel renders nothing on its own
+          once there's no in-flight request (or it's been declined/timed out), so brokers'
+          offers surface underneath it either way. */}
       {booking.status === "Requested" && (
-        <OffersPanel booking={booking} onAccepted={onOfferAccepted} />
+        <>
+          <DriverRequestPanel booking={booking} onAccepted={onOfferAccepted} />
+          <OffersPanel booking={booking} onAccepted={onOfferAccepted} />
+        </>
       )}
 
       {/* Info Grid */}
