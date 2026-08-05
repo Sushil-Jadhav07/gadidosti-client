@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Marker, Circle, DirectionsService, DirectionsRenderer, TrafficLayer } from "@react-google-maps/api";
 import { io } from "socket.io-client";
-import { Truck as TruckIcon, RefreshCw, Check } from "lucide-react";
+import { Truck as TruckIcon, Check } from "lucide-react";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 import { TRUCK_IMAGES } from "../lib/truckImages";
 import { api, getToken } from "../services/api";
@@ -43,22 +43,26 @@ const MAP_OPTIONS = {
   styles: MAP_STYLE,
 };
 
-// A real teardrop pin (not the tiny legacy "-dot" icon) so pickup/drop are unmistakable
-// against the map — a white core on a solid color, matching the blue-pickup/green-drop
-// convention used everywhere else in this app (MapView, TrackShipment, the address step).
-// Built once per color via useMemo below (NOT called inline in JSX) — this map re-renders
-// on every animation frame while trucks are moving, and rebuilding a fresh data-URI/Size/
-// Point object 60x/second made Google Maps repeatedly reload the icon, flickering it
-// invisible more often than not.
+// A real teardrop pin with a soft drop shadow (not the tiny legacy "-dot" icon) so
+// pickup/drop are unmistakable against the map — a white core on a solid color, matching
+// the blue-pickup/green-drop convention used everywhere else in this app (MapView,
+// TrackShipment, the address step). Built once per color via useMemo below (NOT called
+// inline in JSX) — this map re-renders on every animation frame while trucks are moving,
+// and rebuilding a fresh data-URI/Size/Point object 60x/second made Google Maps repeatedly
+// reload the icon, flickering it invisible more often than not.
 const buildPinIcon = (color) => ({
   url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="42" viewBox="0 0 30 42">` +
-    `<path d="M15 0C6.7 0 0 6.7 0 15c0 11.25 15 27 15 27s15-15.75 15-27C30 6.7 23.3 0 15 0z" fill="${color}"/>` +
-    `<circle cx="15" cy="15" r="6" fill="#fff"/>` +
-    `</svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="36" viewBox="0 0 26 36">` +
+    `<defs><filter id="s" x="-60%" y="-20%" width="220%" height="180%">` +
+    `<feDropShadow dx="0" dy="1.5" stdDeviation="1.3" flood-color="#000" flood-opacity="0.35"/>` +
+    `</filter></defs>` +
+    `<g filter="url(#s)">` +
+    `<path d="M13 1.5C7 1.5 2 6.4 2 12.3 2 21 13 33.5 13 33.5s11-12.5 11-21.2C24 6.4 19 1.5 13 1.5z" fill="${color}"/>` +
+    `<circle cx="13" cy="12.3" r="4.6" fill="#fff"/>` +
+    `</g></svg>`
   )}`,
-  scaledSize: new window.google.maps.Size(30, 42),
-  anchor: new window.google.maps.Point(15, 42),
+  scaledSize: new window.google.maps.Size(26, 36),
+  anchor: new window.google.maps.Point(13, 33.5),
 });
 
 const easedPositionAt = (anim, now) => {
@@ -123,7 +127,6 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
   const [trucks, setTrucks] = useState([]);
   const [loadingTrucks, setLoadingTrucks] = useState(false);
   const [trucksError, setTrucksError] = useState(false);
-  const [retryToken, setRetryToken] = useState(0);
   const [hoveredId, setHoveredId] = useState(null);
   const [liveByTruck, setLiveByTruck] = useState({}); // truckId -> { lat, lng, lastLocationAt }
 
@@ -171,7 +174,7 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
       }
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [hasPickup, pickupLat, pickupLng, radiusKm, truckCategory, capacity, retryToken]);
+  }, [hasPickup, pickupLat, pickupLng, radiusKm, truckCategory, capacity]);
 
   // Keep the socket's tracked-truck set in sync with whichever trucks are currently listed —
   // a truck that drops out of the nearby list on refetch gets explicitly un-tracked.
@@ -235,7 +238,7 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     if (!isLoaded) return {};
     const icons = {};
     Object.entries(TRUCK_IMAGES).forEach(([category, url]) => {
-      [28, 36, 40].forEach((size) => {
+      [20, 26, 30].forEach((size) => {
         icons[`${category}-${size}`] = {
           url,
           scaledSize: new window.google.maps.Size(size, size),
@@ -264,15 +267,15 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
   }), []);
 
   return (
-    <div className="mt-8">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <p className="text-sm font-semibold text-neutral-700">Trucks near your pickup</p>
-        <div className="flex items-center gap-1.5">
+    <div className="mt-5">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <p className="text-xs font-semibold text-neutral-700">Trucks near your pickup</p>
+        <div className="flex items-center gap-1">
           {RADIUS_PRESETS_KM.map((km) => (
             <button
               key={km}
               onClick={() => setRadiusKm(km)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+              className={`px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors ${
                 radiusKm === km ? "bg-primary text-white" : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
               }`}
             >
@@ -283,32 +286,26 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
       </div>
 
       {!hasPickup ? (
-        <div className="bg-neutral-50 rounded-xl p-6 text-center text-sm text-neutral-400">
+        <div className="bg-neutral-50 rounded-xl p-4 text-center text-xs text-neutral-400">
           Select a precise pickup address (from the suggestions list in Step 2) to see nearby trucks.
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr] gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,260px)_1fr] gap-3">
           {/* Left: truck list */}
-          <div className="bg-neutral-50 rounded-xl border border-neutral-100 max-h-[420px] overflow-y-auto">
+          <div className="bg-neutral-50 rounded-xl border border-neutral-100 max-h-[300px] overflow-y-auto">
             {loadingTrucks && trucks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16">
-                <span className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
-                <p className="text-xs text-neutral-400">Finding trucks nearby...</p>
+              <div className="flex flex-col items-center justify-center py-10">
+                <span className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+                <p className="text-[11px] text-neutral-400">Finding trucks nearby...</p>
               </div>
             ) : trucksError ? (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                <p className="text-xs text-neutral-400 mb-2">Couldn't load nearby trucks.</p>
-                <button
-                  onClick={() => setRetryToken((n) => n + 1)}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
-                >
-                  <RefreshCw className="w-3 h-3" /> Retry
-                </button>
+              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                <p className="text-[11px] text-neutral-400">Couldn't load nearby trucks. Try a different radius.</p>
               </div>
             ) : sortedTrucks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                <TruckIcon className="w-8 h-8 text-neutral-200 mb-2" />
-                <p className="text-xs text-neutral-400">No trucks within {radiusKm} km right now. Try a wider radius.</p>
+              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                <TruckIcon className="w-6 h-6 text-neutral-200 mb-1.5" />
+                <p className="text-[11px] text-neutral-400">No trucks within {radiusKm} km right now. Try a wider radius.</p>
               </div>
             ) : (
               <div className="divide-y divide-neutral-100">
@@ -321,30 +318,30 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
                       onClick={() => onSelectTruck?.(t)}
                       onMouseEnter={() => setHoveredId(String(t.id))}
                       onMouseLeave={() => setHoveredId(null)}
-                      className={`w-full p-3 flex items-start gap-3 text-left transition-colors ${
+                      className={`w-full p-2 flex items-start gap-2 text-left transition-colors ${
                         isSelected ? "bg-primary-50" : hoveredId === String(t.id) ? "bg-neutral-100" : "hover:bg-white"
                       }`}
                     >
-                      <div className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1 border ${isSelected ? "border-primary" : "border-neutral-100"}`}>
+                      <div className={`w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1 border ${isSelected ? "border-primary" : "border-neutral-100"}`}>
                         {TRUCK_IMAGES[t.category] ? (
                           <img src={TRUCK_IMAGES[t.category]} alt={t.category} className="w-full h-full object-contain" />
                         ) : (
-                          <TruckIcon className="w-5 h-5 text-primary" />
+                          <TruckIcon className="w-4 h-4 text-primary" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
-                          <p className="text-sm font-semibold text-neutral-800 truncate">{t.registration}</p>
-                          {isSelected && <Check className="w-3.5 h-3.5 text-primary flex-shrink-0" strokeWidth={3} />}
+                          <p className="text-xs font-semibold text-neutral-800 truncate">{t.registration}</p>
+                          {isSelected && <Check className="w-3 h-3 text-primary flex-shrink-0" strokeWidth={3} />}
                         </div>
-                        <p className="text-xs text-neutral-400 truncate">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
-                        <p className="text-[11px] text-neutral-400">{t.capacity}{t.year ? ` · ${t.year}` : ""}</p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[10px] text-neutral-400 truncate">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] text-neutral-400">{t.capacity}</span>
                           {t.distanceKm != null && (
-                            <span className="text-[11px] font-semibold text-primary">{Number(t.distanceKm).toFixed(1)} km away</span>
+                            <span className="text-[10px] font-semibold text-primary">· {Number(t.distanceKm).toFixed(1)} km</span>
                           )}
-                          <span className="inline-flex items-center gap-1 text-[10px] text-success">
-                            <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> Live
+                          <span className="inline-flex items-center gap-1 text-[9px] text-success ml-auto">
+                            <span className="w-1 h-1 rounded-full bg-success animate-pulse" /> Live
                           </span>
                         </div>
                       </div>
@@ -356,14 +353,14 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
           </div>
 
           {/* Right: map */}
-          <div className="relative rounded-xl overflow-hidden border border-neutral-100" style={{ height: "420px" }}>
+          <div className="relative rounded-xl overflow-hidden border border-neutral-100" style={{ height: "300px" }}>
             {loadError ? (
               <div className="h-full flex items-center justify-center bg-neutral-50">
-                <p className="text-sm text-neutral-400">Couldn't load the map right now.</p>
+                <p className="text-xs text-neutral-400">Couldn't load the map right now.</p>
               </div>
             ) : !isLoaded ? (
               <div className="h-full flex flex-col items-center justify-center bg-neutral-50">
-                <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+                <span className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
                 <p className="text-xs text-neutral-400">Loading map...</p>
               </div>
             ) : (
@@ -397,7 +394,7 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
                     if (!pos) return null;
                     const isSelected = String(selectedTruckId) === String(t.id);
                     const isHovered = hoveredId === String(t.id);
-                    const size = isSelected ? 40 : isHovered ? 36 : 28;
+                    const size = isSelected ? 30 : isHovered ? 26 : 20;
                     return (
                       <Marker
                         key={t.id}

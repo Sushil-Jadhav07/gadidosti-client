@@ -3,7 +3,7 @@ import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
-  Ban, Navigation, Pencil, LocateFixed,
+  Pencil, LocateFixed,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -44,20 +44,6 @@ const INITIAL_FORM = {
   truckType: null,
   selectedTruckId: null,
 };
-
-function TipItem({ icon: Icon, title, children }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="w-9 h-9 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-        <Icon className="w-4 h-4 text-primary" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-neutral-800">{title}</p>
-        <p className="text-xs text-neutral-400 mt-0.5">{children}</p>
-      </div>
-    </div>
-  );
-}
 
 // A custom-styled, type-to-filter dropdown for Material Type, replacing the native
 // <input list="..."> + <datalist> combo — datalist's suggestion popup is rendered by the
@@ -111,15 +97,6 @@ function MaterialTypeInput({ options, value, onChange, placeholder }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function SidePanel({ title, children }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-card p-5">
-      <p className="font-poppins font-semibold text-base text-neutral-800 mb-4">{title}</p>
-      <div className="space-y-4">{children}</div>
     </div>
   );
 }
@@ -416,9 +393,7 @@ export default function BookTruck() {
   const truck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
   const hasSummaryContent = form.transportType || form.pickup || form.drop || form.truckType;
 
-  // Defined once and rendered in whichever column fits the step: stacked under the
-  // contextual tips panel on steps 1-3 (so there's one left column, not two mostly-empty
-  // ones), and as its own column next to the review card on step 4 (Review).
+  // Defined once, rendered as its own sticky right-hand column on every step.
   const bookingSummaryPanel = (
     <div className="bg-white rounded-2xl shadow-card p-5 md:p-6 lg:sticky lg:top-6">
       <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide mb-4">Booking Summary</p>
@@ -545,61 +520,25 @@ export default function BookTruck() {
             onBack={resetFlow}
           />
         ) : (
-        <div className={`grid grid-cols-1 gap-6 items-start ${step === 4 ? "lg:grid-cols-3" : "lg:grid-cols-[300px_1fr]"}`}>
-          {/* Left: contextual tips / trip recap stacked above the live Booking Summary — one
-              column instead of a second, mostly-empty sidebar, dropped on Review where the
-              full-width summary + fare column takes over instead. */}
-          {step !== 4 && (
-            <div className="space-y-6">
-              {step === 1 && (
-                <SidePanel title="Things to keep in mind">
-                  <TipItem icon={Navigation} title="Accurate addresses">
-                    Add complete addresses so your driver can find the location easily.
-                  </TipItem>
-                  <TipItem icon={Route} title="We detect the trip type">
-                    Same city for pickup and drop = Intra-City; different cities = Inter-City — no need to pick it yourself.
-                  </TipItem>
-                  <TipItem icon={ArrowUpDown} title="Swap in one tap">
-                    Use the swap button to flip pickup and drop instantly.
-                  </TipItem>
-                </SidePanel>
-              )}
-              {step === 2 && (
-                <SidePanel title="Package guidelines">
-                  <TipItem icon={Weight} title="Weight matters">
-                    Accurate weight helps us suggest the right vehicle and fare.
-                  </TipItem>
-                  <TipItem icon={Package} title="Pack securely">
-                    We don't provide packaging — please pack items securely.
-                  </TipItem>
-                  <TipItem icon={Ban} title="Restricted items">
-                    Please don't ship hazardous, flammable, or illegal items.
-                  </TipItem>
-                </SidePanel>
-              )}
-              {/* No step-3 (Truck) tips panel: the Booking Summary right below already shows
-                  the route, load and (once picked) truck — a second recap would just repeat it. */}
-              {bookingSummaryPanel}
-            </div>
-          )}
-
-          {/* Center: Form */}
-          <div className={step === 4 ? "lg:col-span-2" : ""}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Center: Form — wide 2/3-width form + Booking Summary as its own right column,
+              the same layout on every step now (no more narrow-sidebar special case). */}
+          <div className="lg:col-span-2">
             <div className="bg-white rounded-2xl shadow-card p-5 md:p-8">
               {/* Step 1 - Location (pickup/drop; transport type is auto-detected from the
                   two cities, not chosen here) */}
               {step === 1 && (
-                <div>
+                <div className="animate-page-enter">
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">
                     Where should we pick up and deliver?
                   </h2>
-                  <p className="text-sm text-neutral-400 mb-6">Add accurate addresses — we'll work out Intra vs Inter-City automatically.</p>
+                  <p className="text-sm text-neutral-400 mb-4">Add accurate addresses — we'll work out Intra vs Inter-City automatically.</p>
 
                   {/* Pickup/drop entry: a connected rail (dot → dashed line → pin) mirrors the
                       route itself, so the two fields read as one trip instead of two unrelated
                       boxes — the same visual language as most ride-hailing/logistics apps. */}
-                  <div className="flex gap-3 mb-4">
-                    <div className="flex flex-col items-center pt-8 pb-8 flex-shrink-0 w-4">
+                  <div className="flex gap-3 mb-3">
+                    <div className="flex flex-col items-center pt-6 pb-6 flex-shrink-0 w-4">
                       {/* Blue pickup / green drop matches MapView's own marker colors (see
                           RouteRenderer below and TrackShipment's map) — same trip, same colors. */}
                       <span className="w-3 h-3 rounded-full bg-primary ring-[3px] ring-primary/20 flex-shrink-0" />
@@ -701,7 +640,7 @@ export default function BookTruck() {
                   {/* Auto-detected once both addresses are known — this replaces the old
                       manual Intra-City/Inter-City choice entirely. */}
                   {form.transportType && (
-                    <div className={`flex items-center gap-2.5 mb-5 px-3.5 py-2.5 rounded-lg border ${
+                    <div className={`flex items-center gap-2.5 mb-4 px-3.5 py-2 rounded-lg border ${
                       form.transportType === "intra" ? "border-primary/20 bg-primary-50" : "border-success/20 bg-green-50"
                     }`}>
                       {form.transportType === "intra" ? (
@@ -750,7 +689,7 @@ export default function BookTruck() {
 
               {/* Step 2 - Load Information */}
               {step === 2 && (
-                <div>
+                <div className="animate-page-enter">
                   <button
                     onClick={() => setStep(1)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
@@ -758,14 +697,14 @@ export default function BookTruck() {
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Tell us about your package</h2>
-                  <p className="text-sm text-neutral-400 mb-6">Accurate details help us suggest the right vehicle and fare.</p>
+                  <p className="text-sm text-neutral-400 mb-4">Accurate details help us suggest the right vehicle and fare.</p>
 
                   {/* Package category — free text, suggestions driven by the admin-configured
                       materialTypes list (never a hardcoded set). */}
-                  <div className="border border-neutral-100 rounded-xl p-4 hover:border-neutral-200 transition-colors mb-6">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                        <Package className="w-4 h-4 text-primary" />
+                  <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors mb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                        <Package className="w-3.5 h-3.5 text-primary" />
                       </span>
                       <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Material Type</label>
                     </div>
@@ -777,23 +716,23 @@ export default function BookTruck() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 md:gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
                     {/* Weight */}
-                    <div className="border border-neutral-100 rounded-xl p-4 hover:border-neutral-200 transition-colors">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <Weight className="w-4 h-4 text-primary" />
+                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                          <Weight className="w-3.5 h-3.5 text-primary" />
                         </span>
                         <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Weight (Tons)</label>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => updateForm("weight", Math.max(0.5, Number((form.weight - 0.5).toFixed(1))))}
-                          className="w-10 h-10 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
+                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
                         >
                           −
                         </button>
-                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1.5 px-2 text-center">
+                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1 px-2 text-center">
                           <input
                             type="number"
                             min={0.5}
@@ -804,36 +743,36 @@ export default function BookTruck() {
                               const v = parseFloat(e.target.value);
                               updateForm("weight", Number.isNaN(v) ? 0.5 : Math.min(50, Math.max(0.5, v)));
                             }}
-                            className="w-full bg-transparent text-center font-poppins font-bold text-xl text-neutral-800 outline-none tabular-nums"
+                            className="w-full bg-transparent text-center font-poppins font-bold text-lg text-neutral-800 outline-none tabular-nums"
                           />
-                          <p className="text-xs text-neutral-400">Tons</p>
+                          <p className="text-[10px] text-neutral-400">Tons</p>
                         </div>
                         <button
                           onClick={() => updateForm("weight", Math.min(50, Number((form.weight + 0.5).toFixed(1))))}
-                          className="w-10 h-10 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
+                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
                         >
                           +
                         </button>
                       </div>
-                      <p className="text-[11px] text-neutral-300 mt-2">Recommended: 2–5 Tons for your route</p>
+                      <p className="text-[10px] text-neutral-300 mt-1.5">Recommended: 2–5 Tons</p>
                     </div>
 
                     {/* Quantity */}
-                    <div className="border border-neutral-100 rounded-xl p-4 hover:border-neutral-200 transition-colors">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <Hash className="w-4 h-4 text-primary" />
+                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                          <Hash className="w-3.5 h-3.5 text-primary" />
                         </span>
                         <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Number of Items</label>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => updateForm("quantity", Math.max(1, form.quantity - 1))}
-                          className="w-10 h-10 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
+                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
                         >
                           −
                         </button>
-                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1.5 px-2 text-center">
+                        <div className="flex-1 bg-neutral-50 border border-neutral-100 rounded-lg py-1 px-2 text-center">
                           <input
                             type="number"
                             min={1}
@@ -844,13 +783,13 @@ export default function BookTruck() {
                               const v = parseInt(e.target.value, 10);
                               updateForm("quantity", Number.isNaN(v) ? 1 : Math.min(100, Math.max(1, v)));
                             }}
-                            className="w-full bg-transparent text-center font-poppins font-bold text-xl text-neutral-800 outline-none tabular-nums"
+                            className="w-full bg-transparent text-center font-poppins font-bold text-lg text-neutral-800 outline-none tabular-nums"
                           />
-                          <p className="text-xs text-neutral-400">items</p>
+                          <p className="text-[10px] text-neutral-400">items</p>
                         </div>
                         <button
                           onClick={() => updateForm("quantity", Math.min(100, form.quantity + 1))}
-                          className="w-10 h-10 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
+                          className="w-9 h-9 rounded-lg bg-primary-50 text-primary font-bold text-lg flex items-center justify-center hover:bg-primary/15 active:scale-95 transition-all flex-shrink-0"
                         >
                           +
                         </button>
@@ -858,13 +797,13 @@ export default function BookTruck() {
                     </div>
 
                     {/* Notes */}
-                    <div className="border border-neutral-100 rounded-xl p-4 hover:border-neutral-200 transition-colors">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                          <ClipboardList className="w-4 h-4 text-primary" />
+                    <div className="border border-neutral-100 rounded-xl p-3 hover:border-neutral-200 transition-colors">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                          <ClipboardList className="w-3.5 h-3.5 text-primary" />
                         </span>
                         <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-                          Additional Notes <span className="text-neutral-300 normal-case font-normal">(Optional)</span>
+                          Notes <span className="text-neutral-300 normal-case font-normal">(Optional)</span>
                         </label>
                       </div>
                       <div className="relative">
@@ -873,9 +812,9 @@ export default function BookTruck() {
                           onChange={(e) => updateForm("notes", e.target.value.slice(0, 200))}
                           placeholder="Any special instructions..."
                           rows={2}
-                          className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all resize-none"
+                          className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all resize-none"
                         />
-                        <span className="absolute bottom-2 right-3 text-[10px] text-neutral-300">
+                        <span className="absolute bottom-1.5 right-2.5 text-[10px] text-neutral-300">
                           {form.notes.length}/200
                         </span>
                       </div>
@@ -886,7 +825,7 @@ export default function BookTruck() {
 
               {/* Step 3 - Select Truck */}
               {step === 3 && (
-                <div>
+                <div className="animate-page-enter">
                   <button
                     onClick={() => setStep(2)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
@@ -915,7 +854,7 @@ export default function BookTruck() {
 
               {/* Step 4 - Review & Pay */}
               {step === 4 && (
-                <div>
+                <div className="animate-page-enter">
                   <button
                     onClick={() => setStep(3)}
                     className="flex items-center gap-1.5 text-sm font-medium text-neutral-500 hover:text-neutral-700 transition-colors mb-4"
@@ -1024,13 +963,10 @@ export default function BookTruck() {
             </div>
           </div>
 
-          {/* Right: Live Booking Summary — only its own column on Review, where there's no
-              left tips panel to stack it under instead. */}
-          {step === 4 && (
-            <div className="lg:col-span-1">
-              {bookingSummaryPanel}
-            </div>
-          )}
+          {/* Right: Live Booking Summary — its own column on every step. */}
+          <div className="lg:col-span-1">
+            {bookingSummaryPanel}
+          </div>
         </div>
         )}
       </div>
