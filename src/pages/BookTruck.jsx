@@ -12,7 +12,7 @@ import ChooseBroker from "./ChooseBroker";
 import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-import { bookingRef, setStoredDriverRequestId } from "../utils";
+import { bookingRef, setStoredDriverRequestId, haversineDistanceKm } from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
@@ -250,14 +250,62 @@ export default function BookTruck() {
       setLoadingQuote(true);
       setQuoteError(false);
       try {
-        const distanceRes = await api.post("/api/config/distance", { pickup: form.pickup, drop: form.drop });
-        if (!distanceRes?.success) throw new Error(distanceRes?.message || "Distance unavailable");
-        const distance = distanceRes.data?.distance || 0;
-        // Traffic-aware pricing: feeding these through is what makes the estimate's
-        // trafficMultiplier/trafficSurcharge actually reflect live traffic instead of
-        // defaulting to "no surge" (see PricingModel.estimate).
-        const durationMin = distanceRes.data?.durationMin;
-        const durationInTrafficMin = distanceRes.data?.durationInTrafficMin;
+        let distance;
+        let durationMin;
+        let durationInTrafficMin;
+        let { pickupLat, pickupLng, dropLat, dropLng } = form;
+
+        // A "Popular Cities" chip (or free-typed text the user never picked a suggestion for)
+        // sets pickup/drop text without coordinates — geocode whichever side is missing them
+        // before falling back to the backend's distance lookup, since that lookup's
+        // LOCATION_PROVIDER=fake stub only recognizes a short hardcoded list of city-name
+        // pairs (no same-city entries at all) and 404s on almost everything else.
+        if ((pickupLat == null || pickupLng == null || dropLat == null || dropLng == null) && mapsLoaded && window.google?.maps) {
+          try {
+            const geocoder = new window.google.maps.Geocoder();
+            if (pickupLat == null || pickupLng == null) {
+              const { results } = await geocoder.geocode({ address: form.pickup });
+              const loc = results?.[0]?.geometry?.location;
+              if (loc) {
+                pickupLat = loc.lat();
+                pickupLng = loc.lng();
+                updateForm("pickupLat", pickupLat);
+                updateForm("pickupLng", pickupLng);
+              }
+            }
+            if (dropLat == null || dropLng == null) {
+              const { results } = await geocoder.geocode({ address: form.drop });
+              const loc = results?.[0]?.geometry?.location;
+              if (loc) {
+                dropLat = loc.lat();
+                dropLng = loc.lng();
+                updateForm("dropLat", dropLat);
+                updateForm("dropLng", dropLng);
+              }
+            }
+          } catch {
+            // Non-fatal — the /api/config/distance branch below is the last resort.
+          }
+        }
+
+        // Prefer coordinates (autocomplete selection, or just resolved above) — a straight-line
+        // estimate computed entirely client-side, no backend call needed. Falls back to the
+        // backend's distance lookup only when coordinates still aren't known (geocoding failed
+        // or Maps wasn't loaded yet).
+        if (pickupLat != null && pickupLng != null && dropLat != null && dropLng != null) {
+          distance = haversineDistanceKm(pickupLat, pickupLng, dropLat, dropLng);
+        } else {
+          const distanceRes = await api.post("/api/config/distance", { pickup: form.pickup, drop: form.drop });
+          if (!distanceRes?.success) throw new Error(distanceRes?.message || "Distance unavailable");
+          distance = distanceRes.data?.distance || 0;
+          // Traffic-aware pricing: feeding these through is what makes the estimate's
+          // trafficMultiplier/trafficSurcharge actually reflect live traffic instead of
+          // defaulting to "no surge" (see PricingModel.estimate). Not available from the
+          // straight-line estimate above, so traffic surge only ever applies in this branch.
+          durationMin = distanceRes.data?.durationMin;
+          durationInTrafficMin = distanceRes.data?.durationInTrafficMin;
+        }
+
         const pricingRes = await api.post("/api/bookings/quote", {
           truck_category: form.truckType,
           transport_type: form.transportType,
@@ -285,7 +333,11 @@ export default function BookTruck() {
     return () => {
       clearTimeout(timer);
     };
-  }, [form.truckType, form.pickup, form.drop, form.transportType, token, quoteRetryToken]);
+  }, [
+    form.truckType, form.pickup, form.drop, form.transportType,
+    form.pickupLat, form.pickupLng, form.dropLat, form.dropLng,
+    mapsLoaded, token, quoteRetryToken,
+  ]);
 
   // The system-calculated price is the opening ask every broker sees — negotiating from there
   // happens per-broker on the Choose Broker screen (counter-offers), not at booking time.

@@ -86,6 +86,25 @@ export const clearStoredFcmToken = () => {
   try { localStorage.removeItem(FCM_TOKEN_STORAGE_KEY); } catch { /* ignore */ }
 };
 
+// Straight-line distance between two coordinates (Haversine formula), in km, scaled by a
+// standard road-distance correction factor since real roads are never perfectly straight.
+// Used in BookTruck.jsx as a client-side distance estimate whenever pickup/drop coordinates
+// are already known (from the address autocomplete selection) — bypasses the backend's
+// POST /api/config/distance, whose LOCATION_PROVIDER=fake stub only recognizes a short
+// hardcoded list of city-name pairs (no entry at all for two points in the same city) and
+// 404s on most real addresses.
+const EARTH_RADIUS_KM = 6371;
+const ROAD_DISTANCE_FACTOR = 1.3;
+
+export const haversineDistanceKm = (lat1, lng1, lat2, lng2) => {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const straightLineKm = EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(straightLineKm * ROAD_DISTANCE_FACTOR * 10) / 10;
+};
+
 export const adaptBooking = (booking) => {
   if (!booking) return null;
   const timeline = Array.isArray(booking.timeline) ? booking.timeline.map(formatBookingStatus) : [];
