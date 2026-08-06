@@ -5,8 +5,12 @@ import BottomSheet from "../components/BottomSheet";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { setStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
+import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
-const POLL_MS = 4000;
+// Socket push (see useDriverRequestSocket) is now the primary way this screen updates —
+// polling stays on as a fallback in case the socket connection drops, just at a longer
+// interval since it's no longer doing the real-time work.
+const POLL_MS = 15000;
 
 const statusLabel = (request) => {
   if (request.status === "countered") return "Driver countered — your turn";
@@ -61,6 +65,10 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
       clearStoredDriverRequestId(bookingId);
     }
   }, [request.status, bookingId]);
+
+  useDriverRequestSocket((updated) => {
+    if (updated?.id === request.id) setRequest(updated);
+  });
 
   const openNegotiate = () => {
     const base = Number(request.amount) || Number(askingPrice) || 0;

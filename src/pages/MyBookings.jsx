@@ -10,7 +10,8 @@ import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
+import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
+import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
 const FILTER_TABS = ["All", "Active", "In Transit", "Delivered", "Cancelled"];
 const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
@@ -519,23 +520,33 @@ function InfoTile({ icon: Icon, label, name, sub, tint = "primary" }) {
 const OFFERS_POLL_INTERVAL_MS = 6000;
 
 // Direct-driver negotiation panel — shown above the broker OffersPanel below when this booking
-// also has an in-flight POST /api/bookings/:id/request-truck attempt (started from BookTruck.jsx's
-// Step 3 truck pick). There's no backend endpoint to look up "the driver request for booking X"
-// as a client (only GET /api/driver-requests/:id by the request's own id) — so the id is read
-// back from localStorage (see utils.js's getStoredDriverRequestId), which BookTruck.jsx stashes
-// there the moment the request is created. Renders nothing if no such id is stored, i.e. this
-// booking never had a specific truck requested directly.
+// has an in-flight driver negotiation. Two ways that can happen: the client requested a specific
+// truck themselves (POST /api/bookings/:id/request-truck, started from BookTruck.jsx's Step 3
+// truck pick — the id is stashed in localStorage the moment it's created, see utils.js's
+// getStoredDriverRequestId/setStoredDriverRequestId), or a broker assigned a driver on the
+// client's behalf (job.controller.js's assignDriver) — the client never created that one, so
+// there's no id in localStorage yet; GET /api/driver-requests/booking/:bookingId (below) is what
+// discovers it. Live updates arrive over the socket (useDriverRequestSocket) once either path has
+// a request; polling stays on as a fallback. Renders nothing once there's confirmed to be no
+// active request for this booking either way.
 function DriverRequestPanel({ booking, onAccepted }) {
   const toast = useToast();
   const token = getToken();
-  const requestId = getStoredDriverRequestId(booking.id);
 
+  const [requestId, setRequestId] = useState(() => getStoredDriverRequestId(booking.id));
   const [request, setRequest] = useState(null);
-  const [loading, setLoading] = useState(!!requestId);
-  const [gone, setGone] = useState(!requestId);
+  const [loading, setLoading] = useState(true);
+  const [gone, setGone] = useState(false);
   const [acting, setActing] = useState(false);
   const [counterOpen, setCounterOpen] = useState(false);
   const [counterAmount, setCounterAmount] = useState("");
+
+  const adopt = (found) => {
+    setRequest(found);
+    setRequestId(found.id);
+    setStoredDriverRequestId(booking.id, found.id);
+    if (found.status === "declined") clearStoredDriverRequestId(booking.id);
+  };
 
   const load = async () => {
     try {
@@ -545,10 +556,7 @@ function DriverRequestPanel({ booking, onAccepted }) {
         setGone(true);
         return;
       }
-      setRequest(res.data.request);
-      if (res.data.request.status === "declined") {
-        clearStoredDriverRequestId(booking.id);
-      }
+      adopt(res.data.request);
     } catch {
       /* silent — next poll retries */
     } finally {
@@ -556,15 +564,38 @@ function DriverRequestPanel({ booking, onAccepted }) {
     }
   };
 
+  // No id known yet (localStorage never got one) — check whether a broker assigned a driver on
+  // our behalf instead. A 404 here just means neither flow is in progress for this booking.
+  const discover = async () => {
+    try {
+      const res = await api.get(`/api/driver-requests/booking/${booking.id}`, token);
+      if (res?.success && res.data?.request) adopt(res.data.request);
+      else setGone(true);
+    } catch {
+      setGone(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (!requestId) return;
-    load();
+    if (requestId) load();
+    else discover();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!requestId) return undefined;
     const interval = setInterval(() => {
       if (request?.status !== "accepted" && request?.status !== "declined") load();
     }, OFFERS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
+
+  useDriverRequestSocket((updated) => {
+    if (updated?.bookingId === booking.id) adopt(updated);
+  });
 
   const handleAccept = async () => {
     setActing(true);
@@ -1035,12 +1066,16 @@ function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeN
       {/* Direct-driver request + Broker Offers — negotiation is only live while the booking is
           still awaiting a broker/driver. The direct-driver panel renders nothing on its own
           once there's no in-flight request (or it's been declined/timed out), so brokers'
-          offers surface underneath it either way. */}
+          offers surface underneath it either way. DriverRequestPanel also has to cover
+          "Confirmed" (not just "Requested"): a broker-assigned driver negotiation only starts
+          once a broker has already been picked, i.e. after the booking has moved past
+          "Requested" — see job.controller.js's assignDriver. OffersPanel (broker-vs-client price
+          negotiation) doesn't apply anymore by that point, so it stays "Requested"-only. */}
+      {["Requested", "Confirmed"].includes(booking.status) && (
+        <DriverRequestPanel booking={booking} onAccepted={onOfferAccepted} />
+      )}
       {booking.status === "Requested" && (
-        <>
-          <DriverRequestPanel booking={booking} onAccepted={onOfferAccepted} />
-          <OffersPanel booking={booking} onAccepted={onOfferAccepted} />
-        </>
+        <OffersPanel booking={booking} onAccepted={onOfferAccepted} />
       )}
 
       {/* Info Grid */}
