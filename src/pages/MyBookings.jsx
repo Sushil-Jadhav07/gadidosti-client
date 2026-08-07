@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowRight, Check, Package, Download, XCircle, Truck, Copy, User, Building2,
+  ArrowRight, Check, Package, Download, Mail, XCircle, Truck, Copy, User, Building2,
   Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
@@ -15,6 +15,7 @@ import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
 const FILTER_TABS = ["All", "Active", "In Transit", "Delivered", "Cancelled"];
 const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function MyBookings() {
   const [activeFilter, setActiveFilter] = useState("All");
@@ -25,6 +26,7 @@ export default function MyBookings() {
   const [showPaymentSheet, setShowPaymentSheet] = useState(false);
   const [showRateSheet, setShowRateSheet] = useState(false);
   const [showDisputeSheet, setShowDisputeSheet] = useState(false);
+  const [showEmailSheet, setShowEmailSheet] = useState(false);
   const toast = useToast();
   const { user } = useAuth();
   const token = getToken();
@@ -303,6 +305,7 @@ export default function MyBookings() {
             onPayNow={() => setShowPaymentSheet(true)}
             onRateNow={() => setShowRateSheet(true)}
             onDisputeNow={() => setShowDisputeSheet(true)}
+            onEmailInvoice={() => setShowEmailSheet(true)}
             onOfferAccepted={handleOfferAccepted}
           />
         )}
@@ -328,6 +331,89 @@ export default function MyBookings() {
           <RaiseDisputeSheet booking={selectedBooking} onSubmit={handleDisputeSubmit} onCancel={() => setShowDisputeSheet(false)} />
         )}
       </BottomSheet>
+
+      <BottomSheet isOpen={showEmailSheet} onClose={() => setShowEmailSheet(false)}>
+        {selectedBooking && (
+          <EmailInvoiceSheet booking={selectedBooking} defaultTo={user?.email || ""} onClose={() => setShowEmailSheet(false)} />
+        )}
+      </BottomSheet>
+    </div>
+  );
+}
+
+// Manual send only — never auto-sent. To starts pre-filled with the client's own profile
+// email (so "email me a copy" is a one-tap default) but stays fully editable, same as
+// subject/message.
+function EmailInvoiceSheet({ booking, defaultTo, onClose }) {
+  const toast = useToast();
+  const [to, setTo] = useState(defaultTo || "");
+  const [subject, setSubject] = useState(`Invoice for booking ${bookingRef(booking)}`);
+  const [message, setMessage] = useState(`Hi,\n\nPlease find attached the invoice for booking ${bookingRef(booking)}.\n\nThanks,\nGadiDost`);
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    if (!to.trim() || !subject.trim() || !message.trim()) {
+      toast.error("To, subject, and message are all required");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await api.post(`/api/bookings/${booking.id}/invoice/email`, { to: to.trim(), subject: subject.trim(), message: message.trim() }, getToken());
+      if (!res?.success) throw new Error(res?.message || "Failed to send invoice");
+      toast.success("Invoice emailed.");
+      onClose();
+    } catch (err) {
+      toast.error(err?.message || "Failed to send invoice");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Email Invoice</h3>
+      <p className="text-sm text-neutral-400 mb-5">{booking.pickup} → {booking.drop}</p>
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">To</label>
+      <input
+        type="email"
+        value={to}
+        onChange={(e) => setTo(e.target.value)}
+        placeholder="you@example.com"
+        className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-4"
+      />
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Subject</label>
+      <input
+        type="text"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-4"
+      />
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Message</label>
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        rows={5}
+        className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-5"
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSend}
+          disabled={sending}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-50"
+        >
+          {sending ? "Sending..." : "Send"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -936,11 +1022,30 @@ function OffersPanel({ booking, onAccepted }) {
   );
 }
 
-function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeNow, onOfferAccepted }) {
+function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeNow, onEmailInvoice, onOfferAccepted }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [cancelling, setCancelling] = useState(false);
   const [loadingPod, setLoadingPod] = useState(false);
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+
+  const handleDownloadInvoice = async () => {
+    if (downloadingInvoice) return;
+    setDownloadingInvoice(true);
+    try {
+      const token = getToken();
+      const blobUrl = await api.getFileBlobUrl(`${API_BASE}/api/bookings/${booking.id}/invoice`, token);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `invoice-${bookingRef(booking)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      toast.error(err?.message || "Failed to download invoice");
+    } finally {
+      setDownloadingInvoice(false);
+    }
+  };
   // Report a Problem — available for any active or recently-completed booking; not
   // useful for one that's only just been requested (nothing has happened yet) or cancelled.
   const isDisputable = !["Requested", "Cancelled"].includes(booking.status);
@@ -1196,9 +1301,20 @@ function BookingDetailSheet({ booking, onCancel, onPayNow, onRateNow, onDisputeN
             Track Live
           </button>
         )}
-        <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
+        <button
+          onClick={handleDownloadInvoice}
+          disabled={downloadingInvoice}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+        >
           <Download className="w-4 h-4" />
-          Download Invoice
+          {downloadingInvoice ? "Downloading..." : "Download Invoice"}
+        </button>
+        <button
+          onClick={onEmailInvoice}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          <Mail className="w-4 h-4" />
+          Email me a copy
         </button>
         {isDisputable && (
           <button
