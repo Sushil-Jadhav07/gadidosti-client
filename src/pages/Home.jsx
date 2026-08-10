@@ -4,10 +4,9 @@ import {
   ClipboardList, Package, Wallet, Truck, MapPin, Receipt, Headphones,
   ArrowRight, CheckCircle, TrendingUp, AlertTriangle, RefreshCw,
 } from "lucide-react";
-import BottomSheet from "../components/BottomSheet";
 import StatusBadge from "../components/StatusBadge";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
+import { adaptBooking, bookingRef } from "../utils";
 
 function CountUp({ end, duration = 800, prefix = "", suffix = "" }) {
   const [value, setValue] = useState(0);
@@ -37,7 +36,6 @@ export default function Home() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [selectedBooking, setSelectedBooking] = useState(null);
   const [bookings, setBookings] = useState([]);
   const token = getToken();
 
@@ -213,7 +211,7 @@ export default function Home() {
                 {recentBookings.map((booking) => (
                   <div
                     key={booking.id}
-                    onClick={() => setSelectedBooking(booking)}
+                    onClick={() => navigate(`/bookings/${booking.id}`)}
                     className="cursor-pointer hover:bg-neutral-50 transition-colors duration-150"
                   >
                     {/* Desktop row */}
@@ -342,123 +340,6 @@ export default function Home() {
           </div>
         </div>
       </div>
-
-      {/* Booking Detail Modal */}
-      <BottomSheet isOpen={!!selectedBooking} onClose={() => setSelectedBooking(null)}>
-        {selectedBooking && <BookingDetailContent booking={selectedBooking} />}
-      </BottomSheet>
-    </div>
-  );
-}
-
-function BookingDetailContent({ booking }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-5 pr-8">
-        <div>
-          <h3 className="font-poppins font-semibold text-lg text-neutral-800">{bookingRef(booking)}</h3>
-          <p className="text-sm text-neutral-400 mt-0.5">
-            {booking.pickup} → {booking.drop}
-          </p>
-        </div>
-        <StatusBadge status={booking.status} />
-      </div>
-
-      {/* Status Timeline */}
-      <div className="mb-5">
-        <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-3">Status Timeline</p>
-        <div className="space-y-0">
-          {TIMELINE_STEPS.map((step, index) => {
-            const isCompleted = index < booking.currentStep;
-            const isCurrent = index === booking.currentStep;
-            const isVisible = index <= booking.currentStep + 1;
-            if (!isVisible) return null;
-
-            return (
-              <div key={step} className="flex items-start gap-3">
-                <div className="flex flex-col items-center">
-                  <div
-                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      isCompleted
-                        ? "bg-success"
-                        : isCurrent
-                        ? "bg-primary animate-pulse"
-                        : "border-2 border-neutral-200"
-                    }`}
-                  >
-                    {isCompleted && (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                    {isCurrent && <div className="w-2 h-2 rounded-full bg-white" />}
-                  </div>
-                  {index < TIMELINE_STEPS.length - 1 && index <= booking.currentStep && (
-                    <div className={`w-0.5 h-6 ${index < booking.currentStep ? "bg-success" : "bg-neutral-200"}`} />
-                  )}
-                </div>
-                <span
-                  className={`text-xs pt-0.5 ${
-                    isCompleted ? "text-success font-medium" : isCurrent ? "text-primary font-semibold" : "text-neutral-300"
-                  }`}
-                >
-                  {step}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Info Grid */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Truck Type</p>
-          <p className="text-sm font-medium text-neutral-700">{booking.truckType}</p>
-        </div>
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Weight</p>
-          <p className="text-sm font-medium text-neutral-700">
-            {booking.weight} {booking.weightUnit}
-          </p>
-        </div>
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Material</p>
-          <p className="text-sm font-medium text-neutral-700">{booking.material}</p>
-        </div>
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Quantity</p>
-          <p className="text-sm font-medium text-neutral-700">{booking.quantity} items</p>
-        </div>
-      </div>
-
-      {/* Pricing */}
-      <div className="bg-neutral-50 rounded-lg p-4 mb-4">
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-xs text-neutral-400">Total Amount</span>
-          <span className="font-poppins font-bold text-xl text-primary">
-            ₹{booking.amount.toLocaleString("en-IN")}
-          </span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="text-xs text-neutral-400">Payment Status</span>
-          <span
-            className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              booking.paymentStatus === "Paid" ? "bg-green-50 text-success" : "bg-orange-50 text-warning"
-            }`}
-          >
-            {booking.paymentStatus}
-          </span>
-        </div>
-      </div>
-
-      {booking.driver?.name && (
-        <div className="bg-neutral-50 rounded-lg p-3">
-          <p className="text-[10px] text-neutral-400 mb-1">Driver</p>
-          <p className="text-sm font-medium text-neutral-700">{booking.driver.name}</p>
-          <p className="text-xs text-neutral-400">{booking.driver.phone}</p>
-        </div>
-      )}
     </div>
   );
 }

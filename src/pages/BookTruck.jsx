@@ -3,7 +3,7 @@ import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
-  Pencil, LocateFixed,
+  Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -38,6 +38,11 @@ const INITIAL_FORM = {
   dropLat: null,
   dropLng: null,
   dropCity: null,
+  // Extra stops between pickup and drop (Ola/Uber-style "add stop") — each
+  // { location, lat, lng }, visited in this array order, never auto-reordered. Loading
+  // points are extra pickups (e.g. a second warehouse), unloading points are extra drops.
+  loadingLocations: [],
+  unloadingLocations: [],
   weight: 1,
   quantity: 1,
   materialType: "",
@@ -147,6 +152,14 @@ export default function BookTruck() {
   });
 
   const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  // key is "loadingLocations" | "unloadingLocations"
+  const addStop = (key) => setForm((prev) => ({ ...prev, [key]: [...prev[key], { location: "", lat: null, lng: null }] }));
+  const removeStop = (key, index) => setForm((prev) => ({ ...prev, [key]: prev[key].filter((_, i) => i !== index) }));
+  const updateStop = (key, index, patch) => setForm((prev) => ({
+    ...prev,
+    [key]: prev[key].map((stop, i) => (i === index ? { ...stop, ...patch } : stop)),
+  }));
 
   // Transport type is no longer a manual choice — it's derived from whichever cities the
   // pickup/drop addresses resolve to: same city → Intra-City, different cities → Inter-City.
@@ -289,11 +302,25 @@ export default function BookTruck() {
         }
 
         // Prefer coordinates (autocomplete selection, or just resolved above) — a straight-line
-        // estimate computed entirely client-side, no backend call needed. Falls back to the
-        // backend's distance lookup only when coordinates still aren't known (geocoding failed
-        // or Maps wasn't loaded yet).
+        // estimate computed entirely client-side, no backend call needed, summed leg-by-leg
+        // across every stop in visit order (pickup -> loading stops -> unloading stops ->
+        // drop) when extra stops were added. Falls back to the backend's distance lookup only
+        // when pickup/drop coordinates still aren't known (geocoding failed or Maps wasn't
+        // loaded yet) — extra stops without resolved coordinates are silently skipped from the
+        // sum rather than blocking the whole quote, since PlacesAutocompleteInput always
+        // resolves lat/lng once a suggestion is actually picked.
         if (pickupLat != null && pickupLng != null && dropLat != null && dropLng != null) {
-          distance = haversineDistanceKm(pickupLat, pickupLng, dropLat, dropLng);
+          const chain = [
+            { lat: pickupLat, lng: pickupLng },
+            ...form.loadingLocations.filter((s) => s.lat != null && s.lng != null),
+            ...form.unloadingLocations.filter((s) => s.lat != null && s.lng != null),
+            { lat: dropLat, lng: dropLng },
+          ];
+          distance = 0;
+          for (let i = 0; i < chain.length - 1; i++) {
+            distance += haversineDistanceKm(chain[i].lat, chain[i].lng, chain[i + 1].lat, chain[i + 1].lng);
+          }
+          distance = Math.round(distance * 10) / 10;
         } else {
           const distanceRes = await api.post("/api/config/distance", { pickup: form.pickup, drop: form.drop });
           if (!distanceRes?.success) throw new Error(distanceRes?.message || "Distance unavailable");
@@ -336,6 +363,7 @@ export default function BookTruck() {
   }, [
     form.truckType, form.pickup, form.drop, form.transportType,
     form.pickupLat, form.pickupLng, form.dropLat, form.dropLng,
+    JSON.stringify(form.loadingLocations), JSON.stringify(form.unloadingLocations),
     mapsLoaded, token, quoteRetryToken,
   ]);
 
@@ -383,6 +411,8 @@ export default function BookTruck() {
         duration_in_traffic_min: priceBreakdown.durationInTrafficMin,
         amount: finalAmount,
         payment_status: "pending",
+        add_loading_location: form.loadingLocations.filter((s) => s.lat != null && s.lng != null),
+        add_unloading_location: form.unloadingLocations.filter((s) => s.lat != null && s.lng != null),
       }, token);
 
       if (!response?.success) throw new Error(response?.message || "Failed to confirm booking");
@@ -509,6 +539,11 @@ export default function BookTruck() {
                 <ArrowRight className="w-3.5 h-3.5 text-neutral-300 flex-shrink-0" />
                 <span className="text-sm font-semibold text-neutral-800">{form.drop || "—"}</span>
               </div>
+              {(form.loadingLocations.length > 0 || form.unloadingLocations.length > 0) && (
+                <p className="text-[11px] text-neutral-400 mt-1.5">
+                  +{form.loadingLocations.length} loading, +{form.unloadingLocations.length} unloading stop{(form.loadingLocations.length + form.unloadingLocations.length) === 1 ? "" : "s"}
+                </p>
+              )}
             </div>
           )}
 
@@ -732,6 +767,61 @@ export default function BookTruck() {
                     </div>
                   </div>
 
+                  {/* Ola/Uber-style "add stop" — extra loading points (more pickups) and
+                      unloading points (more drops), visited in this order between the main
+                      pickup and drop. Purely additive: zero stops behaves exactly as before. */}
+                  <div className="mb-4 space-y-3">
+                    {[
+                      { key: "loadingLocations", label: "Loading Point", icon: PackagePlus },
+                      { key: "unloadingLocations", label: "Unloading Point", icon: PackageMinus },
+                    ].map(({ key, label, icon: StopIcon }) => (
+                      form[key].length > 0 && (
+                        <div key={key} className="space-y-2">
+                          {form[key].map((stop, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <StopIcon className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+                              <div className="flex-1 min-w-0 flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-2.5 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
+                                <PlacesAutocompleteInput
+                                  value={stop.location}
+                                  onChange={(v) => updateStop(key, index, { location: v, lat: null, lng: null })}
+                                  onPlaceSelect={({ address, lat, lng }) => updateStop(key, index, { location: address, lat, lng })}
+                                  placeholder={`${label} address`}
+                                  className="flex-1 bg-transparent text-sm text-neutral-700 outline-none placeholder:text-neutral-300 min-w-0"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeStop(key, index)}
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-400 hover:text-danger hover:bg-red-50 flex-shrink-0 transition-colors"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    ))}
+
+                    {/* Both add-stop actions together as a single row of pill buttons, always
+                        in the same place below the lists — not trailing each list separately. */}
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => addStop("loadingLocations")}
+                        className="flex-1 min-w-[160px] flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary-50 text-primary text-xs font-semibold hover:bg-primary/15 active:scale-[0.98] transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Loading Point
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addStop("unloadingLocations")}
+                        className="flex-1 min-w-[160px] flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary-50 text-primary text-xs font-semibold hover:bg-primary/15 active:scale-[0.98] transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Unloading Point
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Auto-detected once both addresses are known — this replaces the old
                       manual Intra-City/Inter-City choice entirely. */}
                   {form.transportType && (
@@ -917,6 +1007,7 @@ export default function BookTruck() {
                     pickupLng={form.pickupLng}
                     dropLat={form.dropLat}
                     dropLng={form.dropLng}
+                    stops={[...form.loadingLocations, ...form.unloadingLocations]}
                     selectedTruckId={form.selectedTruckId}
                     onSelectTruck={(t) => {
                       updateForm("selectedTruckId", t.id);
@@ -966,6 +1057,12 @@ export default function BookTruck() {
                         </div>
                         <div className="flex-1 min-w-0 space-y-2">
                           <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.pickup}</p>
+                          {form.loadingLocations.map((s, i) => (
+                            <p key={`l${i}`} className="text-xs text-neutral-500 truncate flex items-center gap-1"><PackagePlus className="w-3 h-3 flex-shrink-0" /> {s.location}</p>
+                          ))}
+                          {form.unloadingLocations.map((s, i) => (
+                            <p key={`u${i}`} className="text-xs text-neutral-500 truncate flex items-center gap-1"><PackageMinus className="w-3 h-3 flex-shrink-0" /> {s.location}</p>
+                          ))}
                           <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.drop}</p>
                         </div>
                       </div>

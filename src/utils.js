@@ -105,6 +105,18 @@ export const haversineDistanceKm = (lat1, lng1, lat2, lng2) => {
   return Math.round(straightLineKm * ROAD_DISTANCE_FACTOR * 10) / 10;
 };
 
+// Shares a PDF via the browser's native share sheet (attaches the actual file on phones where
+// WhatsApp/etc. are registered share targets); falls back to a wa.me text-only link on desktop
+// or browsers without file-sharing support. No backend WhatsApp API involved.
+export const shareInvoicePdf = async ({ blob, filename, text }) => {
+  const file = new File([blob], filename, { type: "application/pdf" });
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file], title: "Invoice", text });
+  } else {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  }
+};
+
 export const adaptBooking = (booking) => {
   if (!booking) return null;
   const timeline = Array.isArray(booking.timeline) ? booking.timeline.map(formatBookingStatus) : [];

@@ -12,6 +12,7 @@ import Register from "./pages/Register";
 import Home from "./pages/Home";
 import BookTruck from "./pages/BookTruck";
 import MyBookings from "./pages/MyBookings";
+import BookingDetail from "./pages/BookingDetail";
 import TrackShipment from "./pages/TrackShipment";
 import Profile from "./pages/Profile";
 
@@ -26,7 +27,8 @@ const PAGE_TITLES = {
 function WebLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const title = PAGE_TITLES[location.pathname] || "Dashboard";
+  const title = PAGE_TITLES[location.pathname]
+    || (location.pathname.startsWith("/bookings/") ? "Booking Details" : "Dashboard");
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -123,6 +125,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <MyBookings />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/bookings/:id"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <BookingDetail />
             </WebLayout>
           </ProtectedRoute>
         }

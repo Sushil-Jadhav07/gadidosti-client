@@ -1,10 +1,81 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Marker, DirectionsService, DirectionsRenderer } from "@react-google-maps/api";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 const DEFAULT_CENTER = { lat: 19.076, lng: 72.8777 }; // Mumbai — used only when there's nothing to fit bounds to
 
 const MARKER_ICON = (color) => `https://maps.google.com/mapfiles/ms/icons/${color || "blue"}-dot.png`;
+
+// Markers default to a plain colored dot, but a live vehicle (see TrackShipment.jsx) reads much
+// clearer as an actual truck image — pass iconUrl (+ optional iconSize, default 40px square) to
+// use one instead. Built lazily (only once Maps JS has loaded) since window.google.maps.Size/
+// Point don't exist before then.
+const buildMarkerIcon = (marker, isLoaded) => {
+  if (!marker.iconUrl) return { url: MARKER_ICON(marker.color) };
+  if (!isLoaded || !window.google?.maps) return undefined;
+  const size = marker.iconSize || 40;
+  return {
+    url: marker.iconUrl,
+    scaledSize: new window.google.maps.Size(size, size),
+    anchor: new window.google.maps.Point(size / 2, size / 2),
+  };
+};
+
+const ANIM_MS = 800;
+
+const easedPositionAt = (anim, now) => {
+  const t = Math.min(1, (now - anim.start) / ANIM_MS);
+  const eased = 1 - (1 - t) * (1 - t);
+  return {
+    lat: anim.from.lat + (anim.to.lat - anim.from.lat) * eased,
+    lng: anim.from.lng + (anim.to.lng - anim.from.lng) * eased,
+  };
+};
+
+// Eases marker movement between position updates instead of snapping — most noticeable on
+// TrackShipment's live truck marker, which otherwise jumps on every ~7s location poll. Static
+// markers (pickup/drop pins) are unaffected: their position never changes once resolved, so
+// `from` and `to` are identical and the eased value is just that same point. Unlike a
+// permanently-running animation loop, this one only ticks while at least one marker is actually
+// mid-transition, then stops — cheap to leave mounted on a page like TrackShipment for minutes.
+function useAnimatedPositions(markers) {
+  const [, forceTick] = useState(0);
+  const animRef = useRef({});
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const now = performance.now();
+    const activeIds = new Set();
+    markers.forEach((m) => {
+      if (!m.position) return;
+      activeIds.add(m.id);
+      const prev = animRef.current[m.id];
+      if (prev && prev.to.lat === m.position.lat && prev.to.lng === m.position.lng) return;
+      const from = prev ? easedPositionAt(prev, now) : m.position;
+      animRef.current[m.id] = { from, to: m.position, start: now };
+    });
+    Object.keys(animRef.current).forEach((id) => {
+      if (!activeIds.has(id)) delete animRef.current[id];
+    });
+
+    if (!rafRef.current) {
+      const loop = () => {
+        const t = performance.now();
+        const stillAnimating = Object.values(animRef.current).some((a) => t - a.start < ANIM_MS);
+        forceTick((n) => n + 1);
+        rafRef.current = stillAnimating ? requestAnimationFrame(loop) : null;
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    }
+  }, [markers]);
+
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  const now = performance.now();
+  const positions = {};
+  Object.entries(animRef.current).forEach(([id, anim]) => { positions[id] = easedPositionAt(anim, now); });
+  return positions;
+}
 
 const MAP_OPTIONS = {
   streetViewControl: false,
@@ -24,7 +95,8 @@ function RouteRenderer({ route, onResolved }) {
   useEffect(() => {
     setDirections(null);
     setRequested(false);
-  }, [route.origin, route.destination]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.origin, route.destination, JSON.stringify(route.waypoints || [])]);
 
   if (!route.origin || !route.destination) return null;
 
@@ -32,7 +104,15 @@ function RouteRenderer({ route, onResolved }) {
     <>
       {!requested && (
         <DirectionsService
-          options={{ origin: route.origin, destination: route.destination, travelMode: "DRIVING" }}
+          options={{
+            origin: route.origin,
+            destination: route.destination,
+            waypoints: route.waypoints,
+            // Extra loading/unloading stops are visited in the order they were added, not
+            // the shortest path — never let Google reorder them.
+            optimizeWaypoints: false,
+            travelMode: "DRIVING",
+          }}
           callback={(result, status) => {
             setRequested(true);
             if (status === "OK" && result) {
@@ -96,6 +176,10 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
 
   const allMarkers = useMemo(() => [...routeMarkers, ...markers], [routeMarkers, markers]);
   const pointsKey = allMarkers.map((m) => `${m.position?.lat},${m.position?.lng}`).join("|");
+  // Bounds-fitting and the map's center below intentionally use each marker's real (target)
+  // position, not the animated one — otherwise the viewport would subtly drift/re-fit on every
+  // animation frame while a marker is easing into place.
+  const animatedPositions = useAnimatedPositions(allMarkers);
 
   const onLoad = useCallback((instance) => setMap(instance), []);
   const onUnmount = useCallback(() => setMap(null), []);
@@ -144,7 +228,7 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
         <RouteRenderer key={route.id} route={route} onResolved={handleResolved} />
       ))}
       {allMarkers.map((m) => (
-        <Marker key={m.id} position={m.position} icon={{ url: MARKER_ICON(m.color) }} title={m.title} label={m.label} />
+        <Marker key={m.id} position={animatedPositions[m.id] || m.position} icon={buildMarkerIcon(m, isLoaded)} title={m.title} label={m.label} />
       ))}
     </GoogleMap>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, Phone, Check, Truck, MapPin, ArrowRight, Clock, AlertTriangle, MessageCircle } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, MessageCircle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
@@ -7,6 +7,7 @@ import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, TIMELINE_STEPS } from "../utils";
+import { TRUCK_IMAGES } from "../lib/truckImages";
 
 // Friendly, non-technical phrasing for the tracking banner — never expose the raw enum value.
 const INCIDENT_REASON_LABELS = {
@@ -34,6 +35,13 @@ const formatEta = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return h > 0 ? `${h}h ${m}min` : `${m}min`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
 export default function TrackShipment() {
@@ -91,6 +99,8 @@ export default function TrackShipment() {
           driverLng: data.driverLng,
           etaMinutes: data.etaMinutes,
           distanceRemainingKm: data.distanceRemainingKm,
+          isTerminal: !!data.isTerminal,
+          deliveredAt: data.deliveredAt,
         });
       } catch {
         if (!cancelled) setIncident(null);
@@ -121,6 +131,10 @@ export default function TrackShipment() {
   const handleKeyDown = (e) => {
     if (e.key === "Enter") handleSearch();
   };
+
+  // Extra loading/unloading stops (Ola/Uber-style add-stop) between pickup and drop — empty
+  // for the vast majority of bookings, which keeps the rail exactly as it always looked.
+  const routeStops = (activeBooking?.stops || []).filter((s) => s.type === "loading" || s.type === "unloading");
 
   return (
     <div className="p-4 md:p-8 animate-page-enter">
@@ -180,19 +194,10 @@ export default function TrackShipment() {
           <div className="lg:col-span-2 space-y-4 md:space-y-5">
             {/* Booking Summary Card */}
             <div className="bg-white rounded-xl shadow-card p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-xs text-neutral-400 font-medium mb-0.5">{bookingRef(activeBooking)}</p>
-                  <div className="flex items-center gap-2">
-                    <span className="font-poppins font-bold text-base text-neutral-800">
-                      {activeBooking.pickup}
-                    </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-neutral-300" />
-                    <span className="font-poppins font-bold text-base text-neutral-800">
-                      {activeBooking.drop}
-                    </span>
-                  </div>
-                </div>
+              {/* Ref + actions on their own row — kept separate from the address rail below so
+                  long real addresses (not short city names) never squeeze this row unevenly. */}
+              <div className="flex items-center justify-between gap-2 mb-4">
+                <p className="text-xs text-neutral-400 font-medium">{bookingRef(activeBooking)}</p>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={() => setShowChat(true)}
@@ -202,6 +207,37 @@ export default function TrackShipment() {
                     <MessageCircle className="w-4 h-4" />
                   </button>
                   <StatusBadge status={activeBooking.status} />
+                </div>
+              </div>
+
+              {/* Route rail — pickup, any extra loading/unloading stops, then drop, each on its
+                  own full-width line so a long real street address always wraps cleanly instead
+                  of squeezing two columns of text into one row. */}
+              <div className="flex gap-3 pb-4 border-b border-neutral-50">
+                <div className="flex flex-col items-center pt-1 flex-shrink-0 w-4">
+                  <span className="w-3 h-3 rounded-full bg-primary ring-[3px] ring-primary/20 flex-shrink-0" />
+                  <span className="flex-1 w-0 border-l-2 border-dashed border-neutral-200 my-1.5" />
+                  {routeStops.map((_, i) => (
+                    <span key={i} className="flex flex-col items-center flex-shrink-0">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />
+                      <span className="flex-1 w-0 border-l-2 border-dashed border-neutral-200 my-1.5" />
+                    </span>
+                  ))}
+                  <MapPin className="w-4 h-4 text-success flex-shrink-0" fill="currentColor" fillOpacity={0.15} />
+                </div>
+                <div className="flex-1 min-w-0 space-y-3">
+                  <p className="font-poppins font-semibold text-sm text-neutral-800">{activeBooking.pickup}</p>
+                  {routeStops.map((stop, i) => {
+                    const StopIcon = stop.type === "loading" ? PackagePlus : PackageMinus;
+                    return (
+                      <p key={i} className="text-sm text-neutral-600 flex items-center gap-1.5">
+                        <StopIcon className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                        {stop.location}
+                        {stop.status === "done" && <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />}
+                      </p>
+                    );
+                  })}
+                  <p className="font-poppins font-semibold text-sm text-neutral-800">{activeBooking.drop}</p>
                 </div>
               </div>
 
@@ -332,45 +368,82 @@ export default function TrackShipment() {
                     : activeBooking.drop,
                   originLabel: activeBooking.pickup,
                   destinationLabel: activeBooking.drop,
+                  waypoints: routeStops
+                    .filter((s) => s.lat != null && s.lng != null)
+                    .map((s) => ({ location: { lat: Number(s.lat), lng: Number(s.lng) }, stopover: true })),
                 }]}
-                markers={tracking?.driverLat != null && tracking?.driverLng != null ? [{
-                  id: "truck",
-                  position: { lat: Number(tracking.driverLat), lng: Number(tracking.driverLng) },
-                  color: "red",
-                  title: "Your truck",
-                }] : []}
+                markers={[
+                  ...(tracking?.driverLat != null && tracking?.driverLng != null ? [{
+                    id: "truck",
+                    position: { lat: Number(tracking.driverLat), lng: Number(tracking.driverLng) },
+                    iconUrl: TRUCK_IMAGES[activeBooking.truckCategory] || TRUCK_IMAGES.medium,
+                    iconSize: 44,
+                    title: tracking.isTerminal ? "Delivered here" : "Your truck",
+                  }] : []),
+                  // Numbered stop markers between pickup/drop, matching the rail's order.
+                  ...routeStops
+                    .filter((s) => s.lat != null && s.lng != null)
+                    .map((s, i) => ({
+                      id: `stop-${i}`,
+                      position: { lat: Number(s.lat), lng: Number(s.lng) },
+                      color: "yellow",
+                      label: String(i + 1),
+                      title: s.location,
+                    })),
+                ]}
                 height="100%"
                 className="absolute inset-0"
               />
 
-              {/* Live chip */}
-              <div className="absolute top-4 left-4 z-10 bg-success text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-md pointer-events-none">
-                <span className="w-2 h-2 rounded-full bg-white animate-green-pulse" />
-                Live Tracking
-              </div>
+              {/* Live / Delivered chip */}
+              {tracking?.isTerminal ? (
+                <div className="absolute top-4 left-4 z-10 bg-secondary text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg pointer-events-none">
+                  <Check className="w-3 h-3" strokeWidth={3} />
+                  Delivered
+                </div>
+              ) : (
+                <div className="absolute top-4 left-4 z-10 bg-success text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg pointer-events-none">
+                  <span className="w-2 h-2 rounded-full bg-white animate-green-pulse" />
+                  Live Tracking
+                </div>
+              )}
 
               {/* Booking ID chip */}
-              <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-card pointer-events-none">
-                <p className="text-[11px] text-neutral-400">Tracking</p>
-                <p className="text-xs font-semibold text-neutral-700">{bookingRef(activeBooking)}</p>
-              </div>
-
-              {/* ETA Chip */}
-              <div className="absolute bottom-5 right-5 z-10 bg-white rounded-xl px-4 md:px-5 py-3 shadow-card flex items-center gap-3 pointer-events-none">
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Clock className="w-5 h-5 text-primary" />
+              <div className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur-md border border-white/60 rounded-xl px-3 py-2 shadow-lg flex items-center gap-2 pointer-events-none">
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Hash className="w-3.5 h-3.5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-[10px] text-neutral-400">Estimated Arrival</p>
-                  <p className="font-poppins font-bold text-base text-neutral-800">{formatEta(tracking?.etaMinutes)}</p>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wide leading-none mb-0.5">Tracking</p>
+                  <p className="text-xs font-semibold text-neutral-700 leading-none">{bookingRef(activeBooking)}</p>
+                </div>
+              </div>
+
+              {/* ETA / Delivered-at Chip */}
+              <div className="absolute bottom-5 right-5 z-10 bg-white/90 backdrop-blur-md border border-white/60 rounded-xl px-4 md:px-5 py-3 shadow-lg flex items-center gap-3 pointer-events-none">
+                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  {tracking?.isTerminal ? <Check className="w-5 h-5 text-primary" strokeWidth={3} /> : <Clock className="w-5 h-5 text-primary" />}
+                </div>
+                <div>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wide leading-none mb-1">
+                    {tracking?.isTerminal ? "Delivered At" : "Estimated Arrival"}
+                  </p>
+                  <p className="font-poppins font-bold text-base text-neutral-800 leading-none">
+                    {tracking?.isTerminal ? (formatDateTime(tracking.deliveredAt) || "—") : formatEta(tracking?.etaMinutes)}
+                  </p>
                 </div>
               </div>
 
               {/* Material info chip */}
-              <div className="absolute bottom-5 left-5 z-10 bg-white/95 rounded-lg px-3 py-2 shadow-card pointer-events-none">
-                <p className="text-[10px] text-neutral-400 mb-0.5">Cargo</p>
-                <p className="text-xs font-semibold text-neutral-700">{activeBooking.material}</p>
-                <p className="text-[10px] text-neutral-400">{activeBooking.weight} {activeBooking.weightUnit}</p>
+              <div className="absolute bottom-5 left-5 z-10 bg-white/90 backdrop-blur-md border border-white/60 rounded-xl px-3 py-2 shadow-lg flex items-center gap-2 pointer-events-none">
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Package className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wide leading-none mb-0.5">Cargo</p>
+                  <p className="text-xs font-semibold text-neutral-700 leading-none">{activeBooking.material}</p>
+                  <p className="text-[10px] text-neutral-400 mt-0.5">{activeBooking.weight} {activeBooking.weightUnit}</p>
+                </div>
               </div>
             </div>
           </div>

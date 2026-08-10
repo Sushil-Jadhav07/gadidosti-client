@@ -116,7 +116,7 @@ function useAnimatedPositions(targets) {
 // (re-fetched on radius/category/capacity change) seeds the list and map, then a Socket.IO
 // connection — same server/auth pattern as ChatWindow — streams live position updates for
 // exactly the trucks currently in view, joining/leaving tracking rooms as that set changes.
-export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, truckCategory, capacity, selectedTruckId, onSelectTruck }) {
+export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, stops = [], truckCategory, capacity, selectedTruckId, onSelectTruck }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -222,6 +222,14 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     () => (dropLat != null && dropLng != null ? { lat: dropLat, lng: dropLng } : undefined),
     [dropLat, dropLng]
   );
+  // Extra loading/unloading points (Ola-style add-stop) — visited in the order they were
+  // added, never reordered by Google (optimizeWaypoints: false below), since load/unload
+  // order is operationally meaningful, not just a shortest-path problem.
+  const waypoints = useMemo(
+    () => stops.filter((s) => s.lat != null && s.lng != null).map((s) => ({ location: { lat: s.lat, lng: s.lng }, stopover: true })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(stops)]
+  );
   const pickupIcon = useMemo(() => (isLoaded ? buildPinIcon("#1976FF") : undefined), [isLoaded]);
   const dropIcon = useMemo(() => (isLoaded ? buildPinIcon("#17D86B") : undefined), [isLoaded]);
   const circleOptions = useMemo(() => ({
@@ -258,7 +266,8 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
   useEffect(() => {
     setDirections(null);
     setDirectionsRequested(false);
-  }, [center?.lat, center?.lng, dropPosition?.lat, dropPosition?.lng]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [center?.lat, center?.lng, dropPosition?.lat, dropPosition?.lng, JSON.stringify(waypoints)]);
 
   const directionsRendererOptions = useMemo(() => ({
     suppressMarkers: true,
@@ -375,6 +384,8 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
                       options={{
                         origin: center,
                         destination: dropPosition,
+                        waypoints,
+                        optimizeWaypoints: false,
                         travelMode: "DRIVING",
                         // Routes and durations reflect current traffic conditions, not just
                         // free-flow distance — matching what Ola/Uber factor into their route.
