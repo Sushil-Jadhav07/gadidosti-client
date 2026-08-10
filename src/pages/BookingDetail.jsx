@@ -36,7 +36,7 @@ export default function BookingDetail() {
   const [showRateSheet, setShowRateSheet] = useState(false);
   const [showDisputeSheet, setShowDisputeSheet] = useState(false);
   const [showEmailSheet, setShowEmailSheet] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [showCancelSheet, setShowCancelSheet] = useState(false);
   const [loadingPod, setLoadingPod] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
@@ -60,19 +60,13 @@ export default function BookingDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleCancel = async () => {
+  const handleCancel = async (reason) => {
     if (!booking) return;
-    setCancelling(true);
-    try {
-      const res = await api.patch(`/api/bookings/${booking.id}/cancel`, {}, token);
-      if (!res?.success) throw new Error(res?.message || "This booking can no longer be cancelled");
-      setBooking((current) => (current ? { ...current, status: "Cancelled", paymentStatus: "Refunded" } : current));
-      toast.success("Booking cancelled");
-    } catch (err) {
-      toast.error(err?.message || "Failed to cancel booking");
-    } finally {
-      setCancelling(false);
-    }
+    const res = await api.patch(`/api/bookings/${booking.id}/cancel`, { reason }, token);
+    if (!res?.success) throw new Error(res?.message || "This booking can no longer be cancelled");
+    setBooking((current) => (current ? { ...current, status: "Cancelled", paymentStatus: current.paymentStatus === "Paid" ? "Refunded" : current.paymentStatus } : current));
+    setShowCancelSheet(false);
+    toast.success("Booking cancelled");
   };
 
   const handlePaySuccess = async () => {
@@ -203,7 +197,10 @@ export default function BookingDetail() {
   }
 
   const isLive = LIVE_STATUSES.includes(booking.status);
-  const isCancellable = booking.status === "Requested";
+  // Cancellable any time before cargo is actually picked up — including after a driver has
+  // already taken the job (Confirmed/Assigned/En Route), not just while still "Requested".
+  // Past that point, use Report a Problem instead.
+  const isCancellable = ["Requested", "Confirmed", "Assigned", "En Route"].includes(booking.status);
   const isPayable = booking.paymentStatus === "Pending" && booking.status !== "Cancelled";
   const isRatable = ["Delivered", "Completed"].includes(booking.status) && !booking.rating;
   const isDisputable = !["Requested", "Cancelled"].includes(booking.status);
@@ -477,12 +474,11 @@ export default function BookingDetail() {
               )}
               {isCancellable && (
                 <button
-                  onClick={handleCancel}
-                  disabled={cancelling}
-                  className="flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                  onClick={() => setShowCancelSheet(true)}
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
                 >
                   <XCircle className="w-4 h-4 flex-shrink-0" />
-                  {cancelling ? "Cancelling..." : "Cancel"}
+                  Cancel
                 </button>
               )}
             </div>
@@ -545,6 +541,10 @@ export default function BookingDetail() {
 
       <BottomSheet isOpen={showDisputeSheet} onClose={() => setShowDisputeSheet(false)}>
         <RaiseDisputeSheet booking={booking} onSubmit={handleDisputeSubmit} onCancel={() => setShowDisputeSheet(false)} />
+      </BottomSheet>
+
+      <BottomSheet isOpen={showCancelSheet} onClose={() => setShowCancelSheet(false)}>
+        <CancelBookingSheet booking={booking} onSubmit={handleCancel} onCancel={() => setShowCancelSheet(false)} />
       </BottomSheet>
 
       <BottomSheet isOpen={showEmailSheet} onClose={() => setShowEmailSheet(false)}>
@@ -709,6 +709,64 @@ function RaiseDisputeSheet({ booking, onSubmit, onCancel }) {
           className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-danger text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
         >
           {submitting ? "Submitting..." : "Submit Dispute"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Asks for a reason before cancelling — sent to whichever driver/broker is currently assigned
+// so they know why, not just that it happened. Same shape as RaiseDisputeSheet above.
+function CancelBookingSheet({ booking, onSubmit, onCancel }) {
+  const toast = useToast();
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!reason.trim()) {
+      toast.error("Please tell us why you're cancelling");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(reason.trim());
+    } catch (err) {
+      toast.error(err?.message || "Failed to cancel booking");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Cancel this booking?</h3>
+      <p className="text-sm text-neutral-400 mb-5">
+        {booking.pickup} → {booking.drop}
+      </p>
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Reason for cancelling</label>
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. Found another truck, plans changed, no longer needed..."
+        maxLength={500}
+        rows={4}
+        className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-5"
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onCancel}
+          className="flex-1 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          Keep Booking
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-danger text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {submitting ? "Cancelling..." : "Confirm Cancellation"}
         </button>
       </div>
     </div>
