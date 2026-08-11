@@ -1,5 +1,12 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Session-expired signal for AUTHENTICATED calls only (token was sent, and the server still
+// rejected it) — a 401 on a call that never carried a token (login/register/forgot-password)
+// just means bad credentials, not an expired session, and must not trigger this. Listened for
+// once, globally, by SessionExpiredModal.jsx (mounted in App.jsx) so any page's expired-session
+// call surfaces the same re-login popup instead of a silent/generic error.
+export const SESSION_EXPIRED_EVENT = 'auth:session-expired';
+
 const request = async (method, path, body, token) => {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -9,6 +16,9 @@ const request = async (method, path, body, token) => {
     },
     ...(body && { body: JSON.stringify(body) }),
   });
+  if (res.status === 401 && token) {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
   return res.json();
 };
 
@@ -17,6 +27,7 @@ const request = async (method, path, body, token) => {
 // token, so a plain <img src="..."> or <a href="..."> can't load them directly.
 const getFileBlobUrl = async (url, token) => {
   const res = await fetch(url, { headers: { ...(token && { Authorization: `Bearer ${token}` }) } });
+  if (res.status === 401 && token) window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
   if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
   const blob = await res.blob();
   return URL.createObjectURL(blob);
@@ -27,6 +38,7 @@ const getFileBlobUrl = async (url, token) => {
 // string isn't usable.
 const getFileBlob = async (url, token) => {
   const res = await fetch(url, { headers: { ...(token && { Authorization: `Bearer ${token}` }) } });
+  if (res.status === 401 && token) window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
   if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
   return res.blob();
 };

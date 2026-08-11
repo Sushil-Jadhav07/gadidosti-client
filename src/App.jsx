@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import BottomNav from "./components/BottomNav";
 import ErrorBoundary from "./components/ErrorBoundary";
+import SessionExpiredModal from "./components/SessionExpiredModal";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import usePushNotifications from "./hooks/usePushNotifications";
@@ -170,6 +171,7 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <AppRoutes />
+          <SessionExpiredModal />
         </ToastProvider>
       </AuthProvider>
     </ErrorBoundary>

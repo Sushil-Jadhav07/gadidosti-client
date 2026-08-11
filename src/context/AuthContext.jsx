@@ -89,6 +89,11 @@ export function AuthProvider({ children }) {
     }
   }, [session, clearSession]);
 
+  // Deliberately does NOT clearSession() on failure — SessionExpiredModal.jsx (the only
+  // caller) needs the stale session left in place while it shows an inline re-login popup;
+  // clearing it here would flip isAuthenticated false immediately and ProtectedRoute would
+  // yank the user to /login out from under that popup, exactly the jarring navigation it
+  // exists to avoid. The caller decides what happens next on a false return.
   const refreshTokens = useCallback(async () => {
     if (!session?.tokens?.refresh_token) return false;
     try {
@@ -98,9 +103,8 @@ export function AuthProvider({ children }) {
         return true;
       }
     } catch {}
-    clearSession();
     return false;
-  }, [session, persistSession, clearSession]);
+  }, [session, persistSession]);
 
   const forgotPassword = useCallback(async (phone) => {
     const data = await api.post("/api/auth/forgot-password", { phone });
