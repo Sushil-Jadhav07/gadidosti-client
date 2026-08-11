@@ -43,9 +43,9 @@ const formatExpiry = (v) => {
   return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
 };
 
-export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, onPayLater }) {
+export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, onPayLater, initialCategory = "recommended" }) {
   const [stage, setStage] = useState("methods"); // methods -> pin -> processing -> success
-  const [category, setCategory] = useState("recommended");
+  const [category, setCategory] = useState(initialCategory);
   const [upiId, setUpiId] = useState("");
   const [card, setCard] = useState({ number: "", expiry: "", cvv: "", name: "" });
   const [bank, setBank] = useState(null);
@@ -56,7 +56,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
   useEffect(() => {
     if (!open) return;
     setStage("methods");
-    setCategory("recommended");
+    setCategory(initialCategory);
     setUpiId("");
     setCard({ number: "", expiry: "", cvv: "", name: "" });
     setBank(null);
@@ -73,7 +73,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
 
   useEffect(() => {
     if (stage !== "success") return;
-    const t = setTimeout(() => onSuccess(), 1300);
+    const t = setTimeout(() => onSuccess(category === "recommended" ? "upi" : category), 1300);
     return () => clearTimeout(t);
   }, [stage, onSuccess]);
 

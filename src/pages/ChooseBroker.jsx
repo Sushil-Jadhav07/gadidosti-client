@@ -81,7 +81,7 @@ function OfferCard({ offer, selected, onSelect }) {
 // from the booking BookTruck just created; onBack resets the whole wizard back to step 1
 // (there's no safe "previous step" to return to once the booking already exists — going back
 // to Review and confirming again would create a second, duplicate booking).
-export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pickup, drop, onBack }) {
+export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pickup, drop, paymentPreference, onBack }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
@@ -180,10 +180,10 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     }
   };
 
-  const handlePaySuccess = async () => {
+  const handlePaySuccess = async (paymentMode) => {
     setShowPaymentSheet(false);
     try {
-      const res = await api.patch(`/api/bookings/${bookingId}/pay`, {}, token);
+      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode }, token);
       if (!res?.success) throw new Error(res?.message || "Failed to record payment");
     } catch (err) {
       toast.error(err?.message || "Failed to record payment");
@@ -406,6 +406,7 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={handlePayLater}
+        initialCategory={paymentPreference === "later" ? "later" : "recommended"}
       />
     </>
   );

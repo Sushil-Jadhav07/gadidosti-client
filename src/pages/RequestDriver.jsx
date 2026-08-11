@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Phone, Tag, Clock3, Check, Truck, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Phone, Tag, Clock3, Check, Truck, AlertTriangle, CheckCircle2 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
+import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
+import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { setStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
@@ -25,14 +27,18 @@ const statusLabel = (request) => {
 // the booking was already broadcast to brokers when it was created, so if this driver declines,
 // times out, or the client gives up waiting, onFallbackToBrokers() just switches the wizard over
 // to ChooseBroker — nothing needs to be re-created.
-export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers }) {
+export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, paymentPreference, onBack, onFallbackToBrokers }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { user } = useAuth();
   const token = getToken();
 
   const [request, setRequest] = useState(initialRequest);
   const [acting, setActing] = useState(false);
   const pollRef = useRef(null);
+
+  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
+  const [paid, setPaid] = useState(false);
 
   // negotiate.stage: "set" (slider) -> "sent" (waiting on the driver for real — no fake reply)
   const [negotiate, setNegotiate] = useState(null);
@@ -124,6 +130,22 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     }
   };
 
+  const handlePaySuccess = async (paymentMode) => {
+    setShowPaymentSheet(false);
+    try {
+      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode }, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to record payment");
+    } catch (err) {
+      toast.error(err?.message || "Failed to record payment");
+    }
+    setPaid(true);
+  };
+
+  const handlePayLater = () => {
+    setShowPaymentSheet(false);
+    setPaid(true);
+  };
+
   const isTerminalDeclined = request.status === "declined";
   const isConfirmed = request.status === "accepted";
 
@@ -146,7 +168,26 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
         </p>
 
         <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
-          {isConfirmed ? (
+          {isConfirmed && !paid ? (
+            /* ── Driver confirmed — show payment step ── */
+            <>
+              <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-8 h-8 text-success" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
+                {request.driverName ? `Confirmed with ${request.driverName}` : "Driver confirmed"}
+              </h2>
+              <p className="text-sm text-neutral-400 mb-6">
+                Final price: <span className="font-semibold text-primary">₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
+              </p>
+              <button
+                onClick={() => setShowPaymentSheet(true)}
+                className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
+              >
+                Continue to Payment
+              </button>
+            </>
+          ) : isConfirmed ? (
             <>
               <div className="animate-bounce-in mb-6 flex justify-center">
                 <div className="w-24 h-24 rounded-full bg-green-50 flex items-center justify-center shadow-glow-green">
@@ -322,6 +363,16 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
           </div>
         )}
       </BottomSheet>
+
+      <PaymentSheet
+        open={showPaymentSheet}
+        amount={Number(request.amount || askingPrice || 0)}
+        phone={user?.phone}
+        onClose={() => setShowPaymentSheet(false)}
+        onSuccess={handlePaySuccess}
+        onPayLater={handlePayLater}
+        initialCategory={paymentPreference === "later" ? "later" : "recommended"}
+      />
     </>
   );
 }
