@@ -81,7 +81,7 @@ function OfferCard({ offer, selected, onSelect }) {
 // from the booking BookTruck just created; onBack resets the whole wizard back to step 1
 // (there's no safe "previous step" to return to once the booking already exists — going back
 // to Review and confirming again would create a second, duplicate booking).
-export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pickup, drop, paymentPreference, onBack }) {
+export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pickup, drop, onBack }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
@@ -268,12 +268,20 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
             <p className="text-sm text-neutral-400 mb-6">
               Final price: <span className="font-semibold text-primary">₹{Number(selectedOffer?.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
             </p>
-            <button
-              onClick={() => setShowPaymentSheet(true)}
-              className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
-            >
-              Continue to Payment
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowPaymentSheet(true)}
+                className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
+              >
+                Pay Now
+              </button>
+              <button
+                onClick={handlePayLater}
+                className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
+              >
+                Pay Later
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -406,7 +414,6 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={handlePayLater}
-        initialCategory={paymentPreference === "later" ? "later" : "recommended"}
       />
     </>
   );

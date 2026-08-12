@@ -3,7 +3,7 @@ import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
-  Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus, CreditCard, Clock,
+  Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -112,10 +112,6 @@ export default function BookTruck() {
   const toast = useToast();
   const token = getToken();
   const [step, setStep] = useState(1);
-  // Client's stated intent at booking time — the actual payment sheet only appears once a
-  // driver/broker confirms (see RequestDriver.jsx / ChooseBroker.jsx), this just decides which
-  // tab it opens on. Defaults to "later" so nothing implies a charge before the client picks.
-  const [paymentPreference, setPaymentPreference] = useState("later");
   const [cities, setCities] = useState(FALLBACK_CITIES);
   const [materialTypes, setMaterialTypes] = useState(FALLBACK_MATERIALS);
   const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS);
@@ -641,7 +637,6 @@ export default function BookTruck() {
             pickup={createdBooking.pickup}
             drop={createdBooking.drop}
             initialRequest={driverRequest}
-            paymentPreference={paymentPreference}
             onBack={resetFlow}
             onFallbackToBrokers={() => setShowBrokerFallback(true)}
           />
@@ -652,7 +647,6 @@ export default function BookTruck() {
             askingPrice={createdBooking.askingPrice}
             pickup={createdBooking.pickup}
             drop={createdBooking.drop}
-            paymentPreference={paymentPreference}
             onBack={resetFlow}
           />
         ) : (
@@ -1103,37 +1097,11 @@ export default function BookTruck() {
                       </div>
                     </div>
 
-                    <div className="bg-neutral-50 rounded-xl p-4">
-                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide mb-3">How would you like to pay?</p>
-                      <div className="flex flex-wrap gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => setPaymentPreference("now")}
-                          className={`flex-1 min-w-[160px] flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border text-xs font-semibold active:scale-[0.98] transition-all ${
-                            paymentPreference === "now"
-                              ? "border-primary bg-primary text-white"
-                              : "border-primary/30 bg-primary-50 text-primary hover:bg-primary/15"
-                          }`}
-                        >
-                          <CreditCard className="w-3.5 h-3.5" /> Pay Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPaymentPreference("later")}
-                          className={`flex-1 min-w-[160px] flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border text-xs font-semibold active:scale-[0.98] transition-all ${
-                            paymentPreference === "later"
-                              ? "border-primary bg-primary text-white"
-                              : "border-primary/30 bg-primary-50 text-primary hover:bg-primary/15"
-                          }`}
-                        >
-                          <Clock className="w-3.5 h-3.5" /> Pay Later
-                        </button>
-                      </div>
-                      <p className="text-xs text-neutral-400 mt-3">
-                        {paymentPreference === "now"
-                          ? "You'll pay by UPI, card, netbanking, or wallet once a driver or broker confirms."
-                          : "You can settle payment later — you'll get the same option again once a driver or broker confirms."}
-                      </p>
+                    <div className="bg-primary-50 border border-primary/10 rounded-xl p-4 flex items-center gap-3">
+                      <span className="w-9 h-9 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-card">
+                        <Zap className="w-4 h-4 text-primary" />
+                      </span>
+                      <p className="text-sm text-neutral-600">Once a driver or broker confirms your booking, you'll choose to pay now or pay later.</p>
                     </div>
                   </div>
                 </div>

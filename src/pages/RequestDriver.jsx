@@ -27,7 +27,7 @@ const statusLabel = (request) => {
 // the booking was already broadcast to brokers when it was created, so if this driver declines,
 // times out, or the client gives up waiting, onFallbackToBrokers() just switches the wizard over
 // to ChooseBroker — nothing needs to be re-created.
-export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, paymentPreference, onBack, onFallbackToBrokers }) {
+export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
@@ -180,12 +180,20 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
               <p className="text-sm text-neutral-400 mb-6">
                 Final price: <span className="font-semibold text-primary">₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
               </p>
-              <button
-                onClick={() => setShowPaymentSheet(true)}
-                className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
-              >
-                Continue to Payment
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPaymentSheet(true)}
+                  className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
+                >
+                  Pay Now
+                </button>
+                <button
+                  onClick={handlePayLater}
+                  className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
+                >
+                  Pay Later
+                </button>
+              </div>
             </>
           ) : isConfirmed ? (
             <>
@@ -371,7 +379,6 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={handlePayLater}
-        initialCategory={paymentPreference === "later" ? "later" : "recommended"}
       />
     </>
   );
