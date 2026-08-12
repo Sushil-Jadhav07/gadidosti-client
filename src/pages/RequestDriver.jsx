@@ -6,7 +6,7 @@ import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { setStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
+import { setStoredDriverRequestId, clearStoredDriverRequestId, clearStoredBookingWizardState } from "../utils";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
 // Socket push (see useDriverRequestSocket) is now the primary way this screen updates —
@@ -233,10 +233,10 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                 )}
               </div>
               <div className="flex gap-3">
-                <button onClick={() => navigate("/track")} className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors">
+                <button onClick={() => { clearStoredBookingWizardState(); navigate("/track"); }} className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors">
                   Track Booking
                 </button>
-                <button onClick={() => navigate("/")} className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors">
+                <button onClick={() => { clearStoredBookingWizardState(); navigate("/"); }} className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors">
                   Back to Home
                 </button>
               </div>

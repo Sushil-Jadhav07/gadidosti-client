@@ -28,7 +28,24 @@ const MECHANIC_STATUS_LABELS = {
 // Statuses where the driver is actually en route and worth polling live position for —
 // matches formatBookingStatus's labels (adaptBooking already converts the raw enum).
 const LIVE_TRACKING_LABELS = ["Assigned", "En Route", "Picked Up", "In Transit"];
+// Once the cargo's actually been picked up, the meaningful route is "truck's current position
+// -> drop", not the original pickup -> drop line (the truck's already left pickup by now).
+const POST_PICKUP_LABELS = ["Picked Up", "In Transit"];
 const TRACK_POLL_MS = 7000;
+// Only redraw the live route once the truck has moved a meaningful distance — the Directions
+// API would otherwise be re-queried every single 7s poll (a fresh object every render, even
+// when the coordinates haven't meaningfully changed), which is wasteful for a leg that can run
+// for a long time. 150m is small enough that the drawn route still tracks real progress.
+const ROUTE_ORIGIN_UPDATE_THRESHOLD_M = 150;
+
+const haversineMeters = (lat1, lng1, lat2, lng2) => {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 const formatEta = (minutes) => {
   if (minutes == null) return "Calculating...";
@@ -111,6 +128,24 @@ export default function TrackShipment() {
     const interval = LIVE_TRACKING_LABELS.includes(activeBooking.status) ? setInterval(poll, TRACK_POLL_MS) : null;
     return () => { cancelled = true; if (interval) clearInterval(interval); };
   }, [activeBooking?.id, activeBooking?.status, token]);
+
+  // Throttled live route origin for the post-pickup phase — see POST_PICKUP_LABELS/
+  // ROUTE_ORIGIN_UPDATE_THRESHOLD_M above for why this only updates on real movement.
+  const [liveRouteOrigin, setLiveRouteOrigin] = useState(null);
+  useEffect(() => {
+    if (!POST_PICKUP_LABELS.includes(activeBooking?.status) || tracking?.driverLat == null || tracking?.driverLng == null) {
+      setLiveRouteOrigin(null);
+      return;
+    }
+    const lat = Number(tracking.driverLat);
+    const lng = Number(tracking.driverLng);
+    setLiveRouteOrigin((current) => {
+      if (!current || haversineMeters(current.lat, current.lng, lat, lng) >= ROUTE_ORIGIN_UPDATE_THRESHOLD_M) {
+        return { lat, lng };
+      }
+      return current;
+    });
+  }, [activeBooking?.status, tracking?.driverLat, tracking?.driverLng]);
 
   const handleSearch = async () => {
     if (!searchId.trim()) return;
@@ -360,13 +395,15 @@ export default function TrackShipment() {
               <MapView
                 routes={[{
                   id: activeBooking.id,
-                  origin: activeBooking.pickupLat != null && activeBooking.pickupLng != null
+                  origin: liveRouteOrigin
+                    ? liveRouteOrigin
+                    : activeBooking.pickupLat != null && activeBooking.pickupLng != null
                     ? { lat: Number(activeBooking.pickupLat), lng: Number(activeBooking.pickupLng) }
                     : activeBooking.pickup,
                   destination: activeBooking.dropLat != null && activeBooking.dropLng != null
                     ? { lat: Number(activeBooking.dropLat), lng: Number(activeBooking.dropLng) }
                     : activeBooking.drop,
-                  originLabel: activeBooking.pickup,
+                  originLabel: liveRouteOrigin ? "Your truck" : activeBooking.pickup,
                   destinationLabel: activeBooking.drop,
                   waypoints: routeStops
                     .filter((s) => s.lat != null && s.lng != null)

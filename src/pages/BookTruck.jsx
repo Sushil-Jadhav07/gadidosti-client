@@ -12,7 +12,10 @@ import ChooseBroker from "./ChooseBroker";
 import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-import { bookingRef, setStoredDriverRequestId, haversineDistanceKm } from "../utils";
+import {
+  bookingRef, setStoredDriverRequestId, getStoredDriverRequestId, haversineDistanceKm,
+  getStoredBookingWizardState, setStoredBookingWizardState, clearStoredBookingWizardState,
+} from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
@@ -142,6 +145,57 @@ export default function BookTruck() {
   // flow, which was already kicked off automatically when the booking was created either way.
   const [showBrokerFallback, setShowBrokerFallback] = useState(false);
   const [locatingPickup, setLocatingPickup] = useState(false);
+  // True only while restoring step 5 after a reload (see the mount effect below) — the wizard
+  // shows a loading state instead of Step 1 during this window rather than flashing Step 1
+  // before jumping to Step 5 a moment later.
+  const [rehydrating, setRehydrating] = useState(() => getStoredBookingWizardState()?.step >= 5);
+
+  // Reload recovery — a reload used to always dump the client back to Step 1 even mid-
+  // negotiation, since step/createdBooking/driverRequest are all plain useState. Restores
+  // Step 5 by re-fetching the booking (for bookingNumber/askingPrice/pickup/drop — none of
+  // those are trustworthy from storage alone) and, if a direct-driver request was in flight,
+  // the driver request too, deciding the RequestDriver-vs-ChooseBroker branch the same way
+  // handleConfirm originally did.
+  useEffect(() => {
+    const stored = getStoredBookingWizardState();
+    if (!stored?.bookingId || stored.step < 5) return;
+
+    (async () => {
+      try {
+        const bookingRes = await api.get(`/api/bookings/${stored.bookingId}`, token);
+        const booking = bookingRes?.data?.booking;
+        if (!bookingRes?.success || !booking || booking.status === "cancelled") {
+          clearStoredBookingWizardState();
+          return;
+        }
+
+        setCreatedBooking({
+          id: booking.id,
+          bookingNumber: bookingRef(booking),
+          askingPrice: booking.amount,
+          pickup: booking.pickup,
+          drop: booking.drop,
+        });
+
+        const storedRequestId = getStoredDriverRequestId(booking.id);
+        if (storedRequestId) {
+          try {
+            const requestRes = await api.get(`/api/driver-requests/${storedRequestId}`, token);
+            if (requestRes?.success && requestRes.data?.request) {
+              setDriverRequest(requestRes.data.request);
+            }
+          } catch { /* driver request no longer reachable — falls through to the broker flow */ }
+        }
+
+        setStep(5);
+      } catch {
+        clearStoredBookingWizardState();
+      } finally {
+        setRehydrating(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Loaded here (not just inside PlacesAutocompleteInput) so "Use my current location" knows
   // whether window.google.maps.Geocoder is actually ready before it lets the user click it.
@@ -445,6 +499,7 @@ export default function BookTruck() {
       }
 
       setStep(5);
+      if (booking?.id) setStoredBookingWizardState(booking.id, 5);
     } catch (err) {
       toast.error(err?.message || "Failed to confirm booking");
     } finally {
@@ -492,6 +547,7 @@ export default function BookTruck() {
     setShowBrokerFallback(false);
     setForm(INITIAL_FORM);
     setPriceBreakdown(null);
+    clearStoredBookingWizardState();
   };
 
   const canContinue =
@@ -622,6 +678,15 @@ export default function BookTruck() {
       )}
     </div>
   );
+
+  if (rehydrating) {
+    return (
+      <div className="p-4 md:p-8 flex flex-col items-center justify-center py-24">
+        <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+        <p className="text-sm text-neutral-400">Restoring your booking...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-8 animate-page-enter">
