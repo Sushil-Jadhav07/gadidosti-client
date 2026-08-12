@@ -953,9 +953,17 @@ function DriverRequestPanel({ booking, onAccepted }) {
     try {
       const res = await api.patch(`/api/driver-requests/${requestId}/client-accept`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to confirm this driver");
-      clearStoredDriverRequestId(booking.id);
-      toast.success("Confirmed with this driver!");
-      await onAccepted?.();
+      if (res.data?.request?.status === "accepted") {
+        clearStoredDriverRequestId(booking.id);
+        toast.success("Confirmed with this driver!");
+        await onAccepted?.();
+      } else {
+        // Mutual-confirmation: this was only the first commit — the driver/broker still needs
+        // to confirm on their side before the booking is actually finalized.
+        if (res.data?.request) adopt(res.data.request);
+        toast.info("Accepted — waiting for the driver to confirm.");
+        setActing(false);
+      }
     } catch (err) {
       toast.error(err?.message || "Failed to confirm this driver");
       setActing(false);
@@ -1043,6 +1051,33 @@ function DriverRequestPanel({ booking, onAccepted }) {
                 Reject
               </button>
             </div>
+          ) : request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "respondent" ? (
+            /* ── Driver/broker already accepted — your turn, no more negotiating ── */
+            <div className="mt-2">
+              <p className="text-[11px] text-neutral-400 mb-2">This driver accepted — confirm to finalize.</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleAccept}
+                  disabled={acting}
+                  className="flex-1 py-1.5 text-xs font-semibold bg-success text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={handleReject}
+                  disabled={acting}
+                  className="flex-1 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors disabled:opacity-50"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ) : request.status === "awaiting_confirmation" ? (
+            /* ── You already accepted — waiting for the driver/broker to also confirm ── */
+            <p className="text-[11px] text-neutral-400 mt-2">
+              <Clock3 className="w-3 h-3 inline mr-1" />
+              You accepted — waiting for them to confirm.
+            </p>
           ) : (
             <div className="mt-2">
               <p className="text-[11px] text-neutral-400 mb-2">
@@ -1148,8 +1183,16 @@ function OffersPanel({ booking, onAccepted }) {
     try {
       const res = await api.patch(`/api/jobs/requests/${offerId}/client-accept`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to accept offer");
-      toast.success("Offer accepted — booking confirmed!");
-      await onAccepted?.();
+      if (res.data?.booking) {
+        toast.success("Offer accepted — booking confirmed!");
+        await onAccepted?.();
+      } else {
+        // Mutual-confirmation: only the first commit — the broker still needs to confirm.
+        const updated = res.data?.request;
+        if (updated) setOffers((current) => current.map((o) => (o.id === offerId ? updated : o)));
+        toast.info("Accepted — waiting for the broker to confirm.");
+        setBusyId(null);
+      }
     } catch (err) {
       toast.error(err?.message || "Failed to accept offer");
       setBusyId(null);
@@ -1239,6 +1282,29 @@ function OffersPanel({ booking, onAccepted }) {
                     Reject
                   </button>
                 </div>
+              ) : offer.status === "awaiting_confirmation" && offer.pendingConfirmationBy === "broker" ? (
+                /* ── Broker already accepted — your turn, no more negotiating ── */
+                <div className="mt-2">
+                  <p className="text-[11px] text-neutral-400 mb-2">This broker accepted — confirm to finalize.</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleAccept(offer.id)}
+                      disabled={busyId === offer.id}
+                      className="flex-1 py-1.5 text-xs font-semibold bg-success text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => handleReject(offer.id)}
+                      disabled={busyId === offer.id}
+                      className="flex-1 py-1.5 text-xs font-semibold border border-neutral-200 text-neutral-500 rounded-md hover:bg-neutral-50 transition-colors disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ) : offer.status === "awaiting_confirmation" ? (
+                <p className="text-[11px] text-neutral-400 mt-1">You accepted — waiting for them to confirm.</p>
               ) : (
                 <p className="text-[11px] text-neutral-400 mt-1">Waiting for broker's response...</p>
               )}

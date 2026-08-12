@@ -18,6 +18,9 @@ const statusLabel = (request) => {
   if (request.status === "countered") return "Driver countered — your turn";
   if (request.status === "declined") return "No longer available";
   if (request.status === "accepted") return "Confirmed";
+  if (request.status === "awaiting_confirmation") {
+    return request.pendingConfirmationBy === "client" ? "Your turn to confirm" : "Waiting for them to confirm";
+  }
   return request.driverTimedOut ? "No response yet — their broker has been notified" : "Waiting for the driver to respond";
 };
 
@@ -104,7 +107,10 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
       const res = await api.patch(`/api/driver-requests/${request.id}/client-accept`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to confirm this driver");
       if (res.data?.request) setRequest(res.data.request);
-      toast.success(`Confirmed with ${res.data?.request?.driverName || "this driver"}!`);
+      const driverName = res.data?.request?.driverName || "this driver";
+      toast.success(
+        res.data?.request?.status === "accepted" ? `Confirmed with ${driverName}!` : `Accepted — waiting for ${driverName} to also confirm.`
+      );
     } catch (err) {
       toast.error(err?.message || "This request is no longer available — showing broker offers instead.");
       onFallbackToBrokers();
@@ -148,6 +154,12 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
 
   const isTerminalDeclined = request.status === "declined";
   const isConfirmed = request.status === "accepted";
+  // Mutual-confirmation: one side has already committed, the other must now Accept/Decline —
+  // no more negotiating once here. "respondent" pending means the driver/broker already agreed
+  // and it's the client's (this app's) turn; "client" pending means the client already
+  // committed here and is now waiting on the driver/broker.
+  const isYourTurnToConfirm = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "respondent";
+  const isWaitingOnThem = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "client";
 
   return (
     <>
@@ -244,6 +256,48 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
               >
                 See Broker Offers
               </button>
+            </>
+          ) : isYourTurnToConfirm ? (
+            <>
+              <div className="w-16 h-16 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Truck className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">{request.driverName || "This driver"} accepted</h2>
+              {request.driverPhone && (
+                <p className="flex items-center justify-center gap-1 text-xs text-neutral-400 mb-3">
+                  <Phone className="w-3 h-3" /> {request.driverPhone}
+                </p>
+              )}
+              <p className="text-sm text-neutral-400 mb-4">Confirm to finalize this booking — no further negotiation once you do.</p>
+              <p className="font-poppins font-bold text-2xl text-primary mb-6">
+                ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleAccept}
+                  disabled={acting}
+                  className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={handleReject}
+                  disabled={acting}
+                  className="flex-1 py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                >
+                  Decline
+                </button>
+              </div>
+            </>
+          ) : isWaitingOnThem ? (
+            <>
+              <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Clock3 className="w-7 h-7 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Waiting for {request.driverName || "the driver"} to confirm</h2>
+              <p className="text-sm text-neutral-400 mb-6">
+                You accepted at ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")} — we'll update this screen automatically once they confirm.
+              </p>
             </>
           ) : (
             <>

@@ -6,16 +6,21 @@ import PaymentSheet from "../components/PaymentSheet";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
+import { useJobRequestSocket } from "../hooks/useJobRequestSocket";
 
 const POLL_MS = 4000;
 
 // Real backend statuses on a job_request/"offer":
-//  pending   -> broker hasn't responded yet, OR the client just proposed a number and is
-//               waiting on the broker (the same status covers both — it just means "the
-//               broker owes a response").
-//  countered -> the broker replied with a different number; it's the client's turn to act.
-//  accepted  -> this broker won the booking (every other offer auto-declines).
-//  declined  -> this offer is no longer live (lost the race, or was rejected).
+//  pending               -> broker hasn't responded yet, OR the client just proposed a number
+//                            and is waiting on the broker (the same status covers both — it
+//                            just means "the broker owes a response").
+//  countered             -> the broker replied with a different number; it's the client's turn.
+//  awaiting_confirmation -> mutual-confirmation: one side already accepted, the other must now
+//                            confirm or decline (see offer.pendingConfirmationBy) — no more
+//                            negotiating once here.
+//  accepted              -> both sides confirmed; this broker won the booking (every other
+//                            offer auto-declines).
+//  declined              -> this offer is no longer live (lost the race, or was rejected).
 const STATUS_LABEL = {
   pending: "Waiting for broker",
   countered: "Broker countered — your turn",
@@ -27,6 +32,9 @@ const initials = (name) => (name || "?").split(" ").map((n) => n[0]).join("").to
 
 function OfferCard({ offer, selected, onSelect }) {
   const disabled = offer.status === "declined";
+  const awaitingLabel = offer.status === "awaiting_confirmation"
+    ? (offer.pendingConfirmationBy === "broker" ? "Broker accepted — your turn" : "Waiting for broker to confirm")
+    : null;
   return (
     <button
       onClick={() => !disabled && onSelect(offer.id)}
@@ -56,7 +64,7 @@ function OfferCard({ offer, selected, onSelect }) {
         )}
         <p
           className={`inline-flex items-center gap-1 text-[11px] font-medium mt-1.5 px-2 py-0.5 rounded-full ${
-            offer.status === "countered"
+            offer.status === "countered" || offer.status === "awaiting_confirmation"
               ? "bg-amber-50 text-warning"
               : offer.status === "accepted"
               ? "bg-green-50 text-success"
@@ -66,7 +74,7 @@ function OfferCard({ offer, selected, onSelect }) {
           }`}
         >
           {offer.status === "pending" && <Clock3 className="w-3 h-3" />}
-          {STATUS_LABEL[offer.status] || offer.status}
+          {awaitingLabel || STATUS_LABEL[offer.status] || offer.status}
         </p>
         <p className="font-poppins font-bold text-base text-primary mt-2">
           ₹{Number(offer.amount || 0).toLocaleString("en-IN")}
@@ -139,7 +147,17 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     }
   }, [bookingStatus]);
 
+  // Live push (see useJobRequestSocket) — makes "your turn to confirm" / "broker confirmed"
+  // arrive immediately instead of waiting out the 4s poll. Polling stays on as a fallback.
+  useJobRequestSocket((updated) => {
+    if (!updated?.id) return;
+    setOffers((current) => current.map((o) => (o.id === updated.id ? updated : o)));
+  });
+
   const selectedOffer = offers.find((o) => o.id === selectedId) || null;
+  // Once ANY offer is in this state, the client has already committed to a broker and is
+  // waiting on their confirmation — no further offer selection/negotiation makes sense.
+  const waitingOnBrokerOffer = offers.find((o) => o.status === "awaiting_confirmation" && o.pendingConfirmationBy === "client") || null;
 
   const openNegotiate = (offer) => {
     const base = Number(offer.amount) || Number(askingPrice) || 0;
@@ -168,13 +186,35 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     try {
       const res = await api.patch(`/api/jobs/requests/${offer.id}/client-accept`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to accept this broker");
-      toast.success(`Confirmed with ${offer.brokerName || "this broker"}!`);
-      setBookingStatus("confirmed");
-      setSelectedId(offer.id);
+      if (res.data?.booking) {
+        // Both sides now agreed — truly confirmed.
+        toast.success(`Confirmed with ${offer.brokerName || "this broker"}!`);
+        setBookingStatus("confirmed");
+        setSelectedId(offer.id);
+      } else {
+        // First mover — the broker already committed and this was the confirming action, OR
+        // this is the client committing first and awaiting the broker's confirmation. Either
+        // way nothing's finalized yet; just refresh so the offer's new status/pendingConfirmationBy shows.
+        toast.info("Accepted — waiting for the broker to confirm.");
+      }
       fetchOffers({ silent: true });
     } catch (err) {
       toast.error(err?.message || "This offer is no longer available — pick another broker.");
       fetchOffers({ silent: true });
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleReject = async (offer) => {
+    setActing(true);
+    try {
+      const res = await api.patch(`/api/jobs/requests/${offer.id}/client-reject`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to decline this broker");
+      toast.info("Declined — pick another broker.");
+      fetchOffers({ silent: true });
+    } catch (err) {
+      toast.error(err?.message || "Failed to decline");
     } finally {
       setActing(false);
     }
@@ -283,6 +323,19 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
               </button>
             </div>
           </div>
+        ) : waitingOnBrokerOffer ? (
+          /* ── You've already accepted this broker — waiting for them to also confirm ── */
+          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
+            <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+              <Clock3 className="w-7 h-7 text-primary" />
+            </div>
+            <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
+              Waiting for {waitingOnBrokerOffer.brokerName || "the broker"} to confirm
+            </h2>
+            <p className="text-sm text-neutral-400">
+              You accepted at ₹{Number(waitingOnBrokerOffer.amount || askingPrice || 0).toLocaleString("en-IN")} — we'll update this screen automatically once they confirm.
+            </p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
             {/* Left: offer grid */}
@@ -329,6 +382,25 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
 
                     {selectedOffer.status === "declined" ? (
                       <p className="text-sm text-neutral-400 text-center py-2">This broker is no longer available. Pick another.</p>
+                    ) : selectedOffer.status === "awaiting_confirmation" && selectedOffer.pendingConfirmationBy === "broker" ? (
+                      /* ── Broker already accepted — your turn to confirm or decline, no more negotiating ── */
+                      <div className="flex flex-col gap-3">
+                        <p className="text-xs text-neutral-400 -mt-1 mb-1">This broker accepted — confirm to finalize.</p>
+                        <button
+                          onClick={() => handleAccept(selectedOffer)}
+                          disabled={acting}
+                          className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => handleReject(selectedOffer)}
+                          disabled={acting}
+                          className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                        >
+                          Decline
+                        </button>
+                      </div>
                     ) : (
                       <div className="flex flex-col gap-3">
                         <button
