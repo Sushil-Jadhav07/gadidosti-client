@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Phone, Tag, Loader2, CheckCircle2, Check, Clock3 } from "lucide-react";
+import { ArrowLeft, Phone, Tag, Clock3, Building2 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
-import PaymentSheet from "../components/PaymentSheet";
+import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
-import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { useJobRequestSocket } from "../hooks/useJobRequestSocket";
+import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
 const POLL_MS = 4000;
+const DRIVER_DISCOVERY_POLL_MS = 5000;
 
 // Real backend statuses on a job_request/"offer":
 //  pending               -> broker hasn't responded yet, OR the client just proposed a number
@@ -21,83 +21,63 @@ const POLL_MS = 4000;
 //  accepted              -> both sides confirmed; this broker won the booking (every other
 //                            offer auto-declines).
 //  declined              -> this offer is no longer live (lost the race, or was rejected).
-const STATUS_LABEL = {
-  pending: "Waiting for broker",
-  countered: "Broker countered — your turn",
-  accepted: "Accepted",
-  declined: "No longer available",
-};
-
-const initials = (name) => (name || "?").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-
-function OfferCard({ offer, selected, onSelect }) {
-  const disabled = offer.status === "declined";
-  const awaitingLabel = offer.status === "awaiting_confirmation"
-    ? (offer.pendingConfirmationBy === "broker" ? "Broker accepted — your turn" : "Waiting for broker to confirm")
-    : null;
-  return (
-    <button
-      onClick={() => !disabled && onSelect(offer.id)}
-      disabled={disabled}
-      className={`relative flex flex-col items-start gap-3 p-4 rounded-xl border-2 transition-all duration-200 text-left w-full ${
-        disabled
-          ? "border-neutral-100 bg-neutral-50 opacity-60 cursor-not-allowed"
-          : selected
-          ? "border-primary bg-primary-50"
-          : "border-neutral-100 bg-white hover:border-neutral-200"
-      }`}
-    >
-      {selected && !disabled && (
-        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-          <Check className="w-3 h-3 text-white" strokeWidth={3} />
-        </div>
-      )}
-      <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 font-poppins font-bold text-lg bg-primary-50 text-primary">
-        {initials(offer.brokerName)}
-      </div>
-      <div className="min-w-0 w-full">
-        <h4 className="font-poppins font-semibold text-sm text-neutral-800">{offer.brokerName || "Broker"}</h4>
-        {offer.brokerPhone && (
-          <p className="flex items-center gap-1 text-xs text-neutral-400 mt-0.5">
-            <Phone className="w-3 h-3" /> {offer.brokerPhone}
-          </p>
-        )}
-        <p
-          className={`inline-flex items-center gap-1 text-[11px] font-medium mt-1.5 px-2 py-0.5 rounded-full ${
-            offer.status === "countered" || offer.status === "awaiting_confirmation"
-              ? "bg-amber-50 text-warning"
-              : offer.status === "accepted"
-              ? "bg-green-50 text-success"
-              : offer.status === "declined"
-              ? "bg-neutral-100 text-neutral-400"
-              : "bg-primary-50 text-primary"
-          }`}
-        >
-          {offer.status === "pending" && <Clock3 className="w-3 h-3" />}
-          {awaitingLabel || STATUS_LABEL[offer.status] || offer.status}
-        </p>
-        <p className="font-poppins font-bold text-base text-primary mt-2">
-          ₹{Number(offer.amount || 0).toLocaleString("en-IN")}
-        </p>
-      </div>
-    </button>
-  );
-}
+//
+// Priority used to pick the single "primary" offer to negotiate with — same single-target
+// design the direct-pick flow (RequestDriver.jsx) already uses, rather than making the client
+// compare a whole grid of brokers who mostly haven't even responded yet.
+const RANK = { awaiting_confirmation: 3, countered: 2, pending: 1 };
 
 // Rendered as step 6 of the same booking wizard (BookTruck.jsx) once the booking has been
 // created — never routed to directly. bookingId/bookingNumber/askingPrice/pickup/drop come
 // from the booking BookTruck just created; onBack resets the whole wizard back to step 1
 // (there's no safe "previous step" to return to once the booking already exists — going back
 // to Review and confirming again would create a second, duplicate booking).
+//
+// Two phases, split into two components so phase 1's hooks (offer polling, both sockets) fully
+// unmount once phase 2 starts instead of lingering alongside it: (1) BrokerNegotiation —
+// negotiate with a single broker at a time (whichever's furthest along) until one is confirmed
+// by both sides, then discover the driver that broker assigns; (2) once discovered, this
+// wrapper hands off entirely to <RequestDriver> — the exact same single-target accept/
+// negotiate/mutual-confirm/payment flow the direct-pick path already uses, so the client
+// experiences one continuous "accept -> wait for driver -> driver accepts -> booked" flow
+// instead of a separate broker-picking page.
 export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pickup, drop, onBack }) {
-  const navigate = useNavigate();
+  const [driverRequest, setDriverRequest] = useState(null);
+
+  if (driverRequest) {
+    return (
+      <RequestDriver
+        bookingId={bookingId}
+        bookingNumber={bookingNumber}
+        askingPrice={driverRequest.amount || askingPrice}
+        pickup={pickup}
+        drop={drop}
+        initialRequest={driverRequest}
+        onBack={onBack}
+        onFallbackToBrokers={() => setDriverRequest(null)}
+      />
+    );
+  }
+
+  return (
+    <BrokerNegotiation
+      bookingId={bookingId}
+      askingPrice={askingPrice}
+      pickup={pickup}
+      drop={drop}
+      onBack={onBack}
+      onDriverAssigned={setDriverRequest}
+    />
+  );
+}
+
+function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDriverAssigned }) {
   const toast = useToast();
-  const { user } = useAuth();
   const token = getToken();
 
   const [offers, setOffers] = useState([]);
   const [bookingStatus, setBookingStatus] = useState(null);
-  const [selectedId, setSelectedId] = useState(null);
+  const [primaryOfferId, setPrimaryOfferId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [acting, setActing] = useState(false);
@@ -107,9 +87,6 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
   const [negotiate, setNegotiate] = useState(null);
   const [offerAmount, setOfferAmount] = useState(0);
 
-  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-
   const fetchOffers = async ({ silent } = {}) => {
     if (!bookingId) return;
     if (!silent) setLoading(true);
@@ -117,10 +94,8 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     try {
       const res = await api.get(`/api/bookings/${bookingId}/offers`, token);
       if (!res?.success) throw new Error(res?.message || "Failed to load broker offers");
-      const nextOffers = res.data?.offers || [];
-      setOffers(nextOffers);
+      setOffers(res.data?.offers || []);
       setBookingStatus(res.data?.bookingStatus);
-      setSelectedId((current) => current || nextOffers[0]?.id || null);
     } catch {
       setError(true);
     } finally {
@@ -154,10 +129,47 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     setOffers((current) => current.map((o) => (o.id === updated.id ? updated : o)));
   });
 
-  const selectedOffer = offers.find((o) => o.id === selectedId) || null;
-  // Once ANY offer is in this state, the client has already committed to a broker and is
-  // waiting on their confirmation — no further offer selection/negotiation makes sense.
-  const waitingOnBrokerOffer = offers.find((o) => o.status === "awaiting_confirmation" && o.pendingConfirmationBy === "client") || null;
+  // Keep whichever offer is currently "primary" sticky across polls/pushes (avoids the card
+  // jumping between brokers) — only re-pick once the current one dies (declined), or on first
+  // load, preferring whichever live offer has moved furthest through the negotiation.
+  useEffect(() => {
+    setPrimaryOfferId((current) => {
+      const currentOffer = offers.find((o) => o.id === current);
+      if (currentOffer && currentOffer.status !== "declined") return current;
+      const candidates = offers.filter((o) => o.status !== "declined");
+      if (!candidates.length) return null;
+      const best = candidates.reduce((a, b) => ((RANK[b.status] || 0) > (RANK[a.status] || 0) ? b : a));
+      return best.id;
+    });
+  }, [offers]);
+
+  const primaryOffer = offers.find((o) => o.id === primaryOfferId) || null;
+
+  // ── Phase 2 handoff: discover the driver the broker assigned, once the booking is
+  // confirmed. Calls onDriverAssigned so the parent can mount <RequestDriver> and unmount
+  // this whole component (and its polling/sockets) instead of running both at once.
+  const discoverDriverRequest = async () => {
+    try {
+      const res = await api.get(`/api/driver-requests/booking/${bookingId}`, token);
+      if (res?.success && res.data?.request) onDriverAssigned(res.data.request);
+    } catch {
+      /* not assigned yet — keep polling */
+    }
+  };
+
+  useEffect(() => {
+    if (bookingStatus !== "confirmed") return undefined;
+    discoverDriverRequest();
+    const interval = setInterval(discoverDriverRequest, DRIVER_DISCOVERY_POLL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingStatus, bookingId]);
+
+  // The broker's assignDriver call pushes here directly (see job.controller.js), so this
+  // usually beats the poll above.
+  useDriverRequestSocket((updated) => {
+    if (updated?.bookingId === bookingId) onDriverAssigned(updated);
+  });
 
   const openNegotiate = (offer) => {
     const base = Number(offer.amount) || Number(askingPrice) || 0;
@@ -187,19 +199,17 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
       const res = await api.patch(`/api/jobs/requests/${offer.id}/client-accept`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to accept this broker");
       if (res.data?.booking) {
-        // Both sides now agreed — truly confirmed.
+        // Both sides now agreed — booking confirmed, move to waiting-for-driver.
         toast.success(`Confirmed with ${offer.brokerName || "this broker"}!`);
         setBookingStatus("confirmed");
-        setSelectedId(offer.id);
       } else {
-        // First mover — the broker already committed and this was the confirming action, OR
-        // this is the client committing first and awaiting the broker's confirmation. Either
-        // way nothing's finalized yet; just refresh so the offer's new status/pendingConfirmationBy shows.
+        // First mover — nothing finalized yet, just refresh so the offer's new
+        // status/pendingConfirmationBy shows.
         toast.info("Accepted — waiting for the broker to confirm.");
       }
       fetchOffers({ silent: true });
     } catch (err) {
-      toast.error(err?.message || "This offer is no longer available — pick another broker.");
+      toast.error(err?.message || "This offer is no longer available — waiting for another broker.");
       fetchOffers({ silent: true });
     } finally {
       setActing(false);
@@ -211,7 +221,7 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     try {
       const res = await api.patch(`/api/jobs/requests/${offer.id}/client-reject`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to decline this broker");
-      toast.info("Declined — pick another broker.");
+      toast.info("Declined — waiting for another broker.");
       fetchOffers({ silent: true });
     } catch (err) {
       toast.error(err?.message || "Failed to decline");
@@ -220,53 +230,8 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
     }
   };
 
-  const handlePaySuccess = async (paymentMode) => {
-    setShowPaymentSheet(false);
-    try {
-      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode }, token);
-      if (!res?.success) throw new Error(res?.message || "Failed to record payment");
-    } catch (err) {
-      toast.error(err?.message || "Failed to record payment");
-    }
-    setConfirmed(true);
-  };
-
-  const handlePayLater = () => {
-    setShowPaymentSheet(false);
-    setConfirmed(true);
-  };
-
-  // ── Final state: broker confirmed + payment (or pay-later) recorded ──
-  if (confirmed) {
-    return (
-      <div className="min-h-full flex items-center justify-center py-8">
-        <div className="bg-white rounded-2xl shadow-card p-8 md:p-12 max-w-md w-full text-center">
-          <div className="animate-bounce-in mb-6 flex justify-center">
-            <div className="w-24 h-24 rounded-full bg-green-50 flex items-center justify-center shadow-glow-green">
-              <div className="w-16 h-16 rounded-full bg-success flex items-center justify-center">
-                <Check className="w-8 h-8 text-white" strokeWidth={3} />
-              </div>
-            </div>
-          </div>
-          <h1 className="font-poppins font-bold text-2xl text-success mb-2">Booking Confirmed!</h1>
-          <p className="text-sm text-neutral-400 mb-8">Your booking has been successfully placed.</p>
-          <div className="bg-neutral-50 rounded-xl p-5 mb-8">
-            <p className="text-xs text-neutral-400 mb-1">Booking ID</p>
-            <p className="font-poppins font-bold text-2xl text-neutral-800">{bookingNumber}</p>
-            <p className="text-sm text-neutral-400 mt-2">We'll notify you once a driver is assigned.</p>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => navigate("/track")} className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors">
-              Track Booking
-            </button>
-            <button onClick={() => navigate("/")} className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors">
-              Back to Home
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const isYourTurnToConfirm = primaryOffer?.status === "awaiting_confirmation" && primaryOffer?.pendingConfirmationBy === "broker";
+  const isWaitingOnBroker = primaryOffer?.status === "awaiting_confirmation" && primaryOffer?.pendingConfirmationBy === "client";
 
   return (
     <>
@@ -278,10 +243,12 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Choose your broker</h1>
+          <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
+            {primaryOffer?.brokerName ? `Negotiating with ${primaryOffer.brokerName}` : "Finding you a broker"}
+          </h1>
         </div>
         <p className="text-sm text-neutral-400 mb-6 ml-12">
-          {pickup && drop ? `${pickup} → ${drop} · ` : ""}Every broker started from your asking price of ₹{Number(askingPrice || 0).toLocaleString("en-IN")}. Brokers respond in their own time — this list updates automatically.
+          {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
         </p>
 
         {error && (
@@ -291,140 +258,145 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
           </div>
         )}
 
-        {loading ? (
-          <div className="bg-white rounded-2xl shadow-card flex flex-col items-center justify-center py-24">
-            <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
-            <p className="text-sm text-neutral-400">Loading broker responses...</p>
-          </div>
-        ) : bookingStatus === "confirmed" ? (
-          /* ── Broker locked in — show payment step ── */
-          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8 text-success" />
+        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
+          {loading ? (
+            <div className="flex flex-col items-center py-10">
+              <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+              <p className="text-sm text-neutral-400">Loading broker responses...</p>
             </div>
-            <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
-              {selectedOffer?.brokerName ? `Confirmed with ${selectedOffer.brokerName}` : "Broker confirmed"}
-            </h2>
-            <p className="text-sm text-neutral-400 mb-6">
-              Final price: <span className="font-semibold text-primary">₹{Number(selectedOffer?.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowPaymentSheet(true)}
-                className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
-              >
-                Pay Now
-              </button>
-              <button
-                onClick={handlePayLater}
-                className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
-              >
-                Pay Later
-              </button>
+          ) : bookingStatus === "confirmed" ? (
+            /* ── Broker confirmed, driver not discovered yet ── */
+            <>
+              <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Clock3 className="w-7 h-7 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
+                Confirmed with {primaryOffer?.brokerName || "your broker"}
+              </h2>
+              <p className="text-sm text-neutral-400">
+                Final price: <span className="font-semibold text-primary">₹{Number(primaryOffer?.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
+                <br />Waiting for them to assign a driver from their fleet — this screen updates automatically.
+              </p>
+            </>
+          ) : !primaryOffer ? (
+            /* ── No broker has responded at all yet ── */
+            <div className="flex flex-col items-center py-10">
+              <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+              <p className="text-sm text-neutral-400">Waiting for a broker to respond to your booking...</p>
             </div>
-          </div>
-        ) : waitingOnBrokerOffer ? (
-          /* ── You've already accepted this broker — waiting for them to also confirm ── */
-          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
-            <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
-              <Clock3 className="w-7 h-7 text-primary" />
-            </div>
-            <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
-              Waiting for {waitingOnBrokerOffer.brokerName || "the broker"} to confirm
-            </h2>
-            <p className="text-sm text-neutral-400">
-              You accepted at ₹{Number(waitingOnBrokerOffer.amount || askingPrice || 0).toLocaleString("en-IN")} — we'll update this screen automatically once they confirm.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-            {/* Left: offer grid */}
-            <div className="lg:col-span-2">
-              {offers.length === 0 ? (
-                <div className="bg-white rounded-2xl shadow-card flex flex-col items-center justify-center py-16 text-center">
-                  <Loader2 className="w-8 h-8 text-primary/40 animate-spin mb-3" />
-                  <p className="text-sm text-neutral-400">Waiting for brokers to respond to your booking...</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {offers.map((offer) => (
-                    <OfferCard key={offer.id} offer={offer} selected={selectedId === offer.id} onSelect={setSelectedId} />
-                  ))}
-                </div>
+          ) : isYourTurnToConfirm ? (
+            /* ── This broker already accepted — your turn to confirm or decline ── */
+            <>
+              <div className="w-16 h-16 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Building2 className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">{primaryOffer.brokerName || "This broker"} accepted</h2>
+              {primaryOffer.brokerPhone && (
+                <p className="flex items-center justify-center gap-1 text-xs text-neutral-400 mb-3">
+                  <Phone className="w-3 h-3" /> {primaryOffer.brokerPhone}
+                </p>
               )}
-            </div>
+              <p className="text-sm text-neutral-400 mb-4">Confirm to finalize — no further negotiation once you do.</p>
+              <p className="font-poppins font-bold text-2xl text-primary mb-6">
+                ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleAccept(primaryOffer)}
+                  disabled={acting}
+                  className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => handleReject(primaryOffer)}
+                  disabled={acting}
+                  className="flex-1 py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                >
+                  Decline
+                </button>
+              </div>
+            </>
+          ) : isWaitingOnBroker ? (
+            /* ── You already accepted this broker — waiting for them to also confirm ── */
+            <>
+              <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Clock3 className="w-7 h-7 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">
+                Waiting for {primaryOffer.brokerName || "the broker"} to confirm
+              </h2>
+              <p className="text-sm text-neutral-400">
+                You accepted at ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")} — we'll update this screen automatically once they confirm.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="w-16 h-16 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                <Building2 className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">{primaryOffer.brokerName || "Broker"}</h2>
+              {primaryOffer.brokerPhone && (
+                <p className="flex items-center justify-center gap-1 text-xs text-neutral-400 mb-3">
+                  <Phone className="w-3 h-3" /> {primaryOffer.brokerPhone}
+                </p>
+              )}
 
-            {/* Right: selected offer summary + actions */}
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-2xl shadow-card p-5 md:p-6 lg:sticky lg:top-6">
-                <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide mb-4">Selected Broker</p>
+              <p
+                className={`inline-flex items-center gap-1 text-[11px] font-medium mb-4 px-2.5 py-1 rounded-full ${
+                  primaryOffer.status === "countered" ? "bg-amber-50 text-warning" : "bg-primary-50 text-primary"
+                }`}
+              >
+                <Clock3 className="w-3 h-3" />
+                {primaryOffer.status === "countered" ? "Broker countered — your turn" : "Waiting for broker to respond"}
+              </p>
 
-                {!selectedOffer ? (
-                  <p className="text-sm text-neutral-300 text-center py-10">Select a broker to continue</p>
-                ) : (
-                  <div>
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 font-poppins font-bold text-sm bg-primary-50 text-primary">
-                        {initials(selectedOffer.brokerName)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{selectedOffer.brokerName || "Broker"}</p>
-                        {selectedOffer.brokerPhone && <p className="text-xs text-neutral-400 truncate">{selectedOffer.brokerPhone}</p>}
-                      </div>
-                    </div>
+              <p className="font-poppins font-bold text-2xl text-primary mb-6">
+                ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")}
+              </p>
 
-                    <div className="flex items-center justify-between py-3 border-t border-b border-neutral-100 mb-4">
-                      <span className="text-xs text-neutral-400">
-                        {selectedOffer.status === "countered" ? "Broker's Counter" : "Current Price"}
-                      </span>
-                      <span className="font-poppins font-bold text-lg text-primary">₹{Number(selectedOffer.amount || 0).toLocaleString("en-IN")}</span>
-                    </div>
-
-                    {selectedOffer.status === "declined" ? (
-                      <p className="text-sm text-neutral-400 text-center py-2">This broker is no longer available. Pick another.</p>
-                    ) : selectedOffer.status === "awaiting_confirmation" && selectedOffer.pendingConfirmationBy === "broker" ? (
-                      /* ── Broker already accepted — your turn to confirm or decline, no more negotiating ── */
-                      <div className="flex flex-col gap-3">
-                        <p className="text-xs text-neutral-400 -mt-1 mb-1">This broker accepted — confirm to finalize.</p>
-                        <button
-                          onClick={() => handleAccept(selectedOffer)}
-                          disabled={acting}
-                          className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => handleReject(selectedOffer)}
-                          disabled={acting}
-                          className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-3">
-                        <button
-                          onClick={() => handleAccept(selectedOffer)}
-                          disabled={acting}
-                          className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
-                        >
-                          {selectedOffer.status === "countered" ? "Accept This Price" : "Continue"}
-                        </button>
-                        <button
-                          onClick={() => openNegotiate(selectedOffer)}
-                          disabled={acting}
-                          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
-                        >
-                          <Tag className="w-4 h-4" /> Negotiate
-                        </button>
-                      </div>
-                    )}
-                  </div>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => handleAccept(primaryOffer)}
+                  disabled={acting}
+                  className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                >
+                  {primaryOffer.status === "countered" ? "Accept This Price" : `Confirm at ₹${Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")} Now`}
+                </button>
+                <button
+                  onClick={() => openNegotiate(primaryOffer)}
+                  disabled={acting}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                >
+                  <Tag className="w-4 h-4" /> {primaryOffer.status === "countered" ? "Counter" : "Propose a Different Price"}
+                </button>
+                {primaryOffer.status === "countered" && (
+                  <button
+                    onClick={() => handleReject(primaryOffer)}
+                    disabled={acting}
+                    className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                  >
+                    Reject
+                  </button>
                 )}
               </div>
-            </div>
-          </div>
-        )}
+
+              {primaryOffer.offerHistory?.length > 1 && (
+                <details className="mt-5 text-left">
+                  <summary className="text-[11px] text-neutral-400 cursor-pointer select-none">Negotiation history ({primaryOffer.offerHistory.length})</summary>
+                  <div className="mt-1.5 space-y-1">
+                    {primaryOffer.offerHistory.map((entry, i) => (
+                      <p key={i} className="text-[11px] text-neutral-400">
+                        {entry.by === "client" ? "You" : "Broker"} offered{" "}
+                        <span className="font-medium text-neutral-600">₹{Number(entry.amount || 0).toLocaleString("en-IN")}</span>
+                      </p>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Negotiate sheet */}
@@ -473,20 +445,11 @@ export default function ChooseBroker({ bookingId, bookingNumber, askingPrice, pi
               We'll update this screen automatically once they respond — this can take a little while, unlike an instant demo reply.
             </p>
             <button onClick={closeNegotiate} className="w-full py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
-              Back to Offers
+              Back
             </button>
           </div>
         )}
       </BottomSheet>
-
-      <PaymentSheet
-        open={showPaymentSheet}
-        amount={Number(selectedOffer?.amount || askingPrice || 0)}
-        phone={user?.phone}
-        onClose={() => setShowPaymentSheet(false)}
-        onSuccess={handlePaySuccess}
-        onPayLater={handlePayLater}
-      />
     </>
   );
 }
