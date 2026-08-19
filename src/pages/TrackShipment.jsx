@@ -7,8 +7,8 @@ import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, formatBookingStatus, TIMELINE_STEPS } from "../utils";
-import { TRUCK_IMAGES } from "../lib/truckImages";
 import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
+import { useTruckLocationSocket } from "../hooks/useTruckLocationSocket";
 
 // Friendly, non-technical phrasing for the tracking banner — never expose the raw enum value.
 const INCIDENT_REASON_LABELS = {
@@ -121,6 +121,7 @@ export default function TrackShipment() {
         setTracking({
           driverLat: data.driverLat,
           driverLng: data.driverLng,
+          driverHeading: data.driverHeading,
           etaMinutes: data.etaMinutes,
           distanceRemainingKm: data.distanceRemainingKm,
           isTerminal: !!data.isTerminal,
@@ -145,6 +146,20 @@ export default function TrackShipment() {
     setActiveBooking((current) => (current ? { ...current, status: formatBookingStatus(trip.status) } : current));
     setRefreshTick((n) => n + 1);
   });
+
+  // Primary path for the live truck marker while a trip is actually en route — updates
+  // lat/lng/heading the instant a location ping lands, instead of waiting out the rest of the
+  // 7s poll interval above. The poll (still running per the same LIVE_TRACKING_LABELS gate)
+  // remains the fallback: if this socket is disconnected, `tracking` just keeps getting
+  // refreshed from there instead, same as before this existed.
+  useTruckLocationSocket(
+    LIVE_TRACKING_LABELS.includes(activeBooking?.status) ? activeBooking?.truckId : null,
+    ({ lat, lng, heading }) => {
+      setTracking((current) =>
+        current ? { ...current, driverLat: lat, driverLng: lng, driverHeading: heading } : current
+      );
+    }
+  );
 
   // Throttled live route origin for the post-pickup phase — see POST_PICKUP_LABELS/
   // ROUTE_ORIGIN_UPDATE_THRESHOLD_M above for why this only updates on real movement.
@@ -430,7 +445,8 @@ export default function TrackShipment() {
                   ...(tracking?.driverLat != null && tracking?.driverLng != null ? [{
                     id: "truck",
                     position: { lat: Number(tracking.driverLat), lng: Number(tracking.driverLng) },
-                    iconUrl: TRUCK_IMAGES[activeBooking.truckCategory] || TRUCK_IMAGES.medium,
+                    truckCategory: activeBooking.truckCategory || "medium",
+                    heading: tracking.driverHeading,
                     iconSize: 44,
                     title: tracking.isTerminal ? "Delivered here" : "Your truck",
                   }] : []),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, useJsApiLoader, Marker, DirectionsService, DirectionsRenderer } from "@react-google-maps/api";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
+import { buildTruckIcon } from "../lib/truckIcon";
 
 const DEFAULT_CENTER = { lat: 19.076, lng: 72.8777 }; // Mumbai — used only when there's nothing to fit bounds to
 
@@ -8,20 +9,44 @@ const MARKER_ICON = (color) => `https://maps.google.com/mapfiles/ms/icons/${colo
 
 // Markers default to a plain colored dot, but a live vehicle (see TrackShipment.jsx) reads much
 // clearer as an actual truck image — pass iconUrl (+ optional iconSize, default 40px square) to
-// use one instead. Built lazily (only once Maps JS has loaded) since window.google.maps.Size/
-// Point don't exist before then.
-const buildMarkerIcon = (marker, isLoaded) => {
-  if (!marker.iconUrl) return { url: MARKER_ICON(marker.color) };
+// use one instead. A marker with `truckCategory` set additionally rotates to face `heading`
+// (already resolved to the last-known value by useStableHeadings below — this function has no
+// memory of its own, see truckIcon.js). Built lazily (only once Maps JS has loaded) since
+// window.google.maps.Size/Point don't exist before then.
+const buildMarkerIcon = (marker, isLoaded, heading) => {
+  if (!marker.iconUrl && !marker.truckCategory) return { url: MARKER_ICON(marker.color) };
   if (!isLoaded || !window.google?.maps) return undefined;
   const size = marker.iconSize || 40;
   return {
-    url: marker.iconUrl,
+    url: marker.truckCategory ? buildTruckIcon(marker.truckCategory, heading) : marker.iconUrl,
     scaledSize: new window.google.maps.Size(size, size),
     anchor: new window.google.maps.Point(size / 2, size / 2),
   };
 };
 
-const ANIM_MS = 800;
+// Remembers the last known-valid heading per marker id, so a fix with no heading (GPS reports
+// null while stationary — see useDriverLocationTracking.js) keeps the truck pointed the way it
+// was last actually facing instead of snapping back to 0/north. Plain ref, not state — this
+// runs synchronously during the same render that receives new marker props, so nothing needs to
+// force a re-render on its own account (unlike useAnimatedPositions, which drives an ongoing
+// RAF loop and genuinely needs to).
+function useStableHeadings(markers) {
+  const headingRef = useRef({});
+  markers.forEach((m) => {
+    const numeric = Number(m.heading);
+    if (m.heading != null && Number.isFinite(numeric)) {
+      headingRef.current[m.id] = numeric;
+    }
+    // else: leave whatever was last stored (undefined if this marker has never had one)
+  });
+  return headingRef.current;
+}
+
+// Matches the driver apps' location-ping throttle (MIN_INTERVAL_MS in
+// useDriverLocationTracking.js / driver_location_tracker.dart) so each eased tween runs until
+// the next fix actually arrives, instead of finishing early and sitting still for the remainder
+// of the interval — this is what turns periodic smooth hops into continuous-feeling motion.
+const ANIM_MS = 3000;
 
 const easedPositionAt = (anim, now) => {
   const t = Math.min(1, (now - anim.start) / ANIM_MS);
@@ -180,6 +205,9 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
   // position, not the animated one — otherwise the viewport would subtly drift/re-fit on every
   // animation frame while a marker is easing into place.
   const animatedPositions = useAnimatedPositions(allMarkers);
+  // Rotation is intentionally kept out of useAnimatedPositions — icon changes don't touch
+  // `animRef`/the position RAF loop above, so the two stay fully independent as required.
+  const stableHeadings = useStableHeadings(allMarkers);
 
   const onLoad = useCallback((instance) => setMap(instance), []);
   const onUnmount = useCallback(() => setMap(null), []);
@@ -228,7 +256,13 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
         <RouteRenderer key={route.id} route={route} onResolved={handleResolved} />
       ))}
       {allMarkers.map((m) => (
-        <Marker key={m.id} position={animatedPositions[m.id] || m.position} icon={buildMarkerIcon(m, isLoaded)} title={m.title} label={m.label} />
+        <Marker
+          key={m.id}
+          position={animatedPositions[m.id] || m.position}
+          icon={buildMarkerIcon(m, isLoaded, stableHeadings[m.id])}
+          title={m.title}
+          label={m.label}
+        />
       ))}
     </GoogleMap>
   );
