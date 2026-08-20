@@ -17,6 +17,10 @@ const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
 const INVOICE_READY_STATUSES = ["Delivered", "Completed"];
 const OFFERS_POLL_INTERVAL_MS = 6000;
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// Mirrors ADVANCE_PAYMENT_THRESHOLD in gadidosti-backend's booking.controller.js and
+// RequestDriver.jsx — above this, Pay Later isn't offered (this page's Pay Now button always
+// pays in full, so there's no advance option to offer here, only the later-tab to hide).
+const ADVANCE_PAYMENT_THRESHOLD = 5000;
 
 // Full page for a single booking — replaces the old BottomSheet-based detail modal so there's
 // room for a real map of the pickup/drop route (a modal was too cramped for that) and a proper
@@ -533,6 +537,7 @@ export default function BookingDetail() {
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={() => { setShowPaymentSheet(false); toast.info("You can pay anytime from this page."); }}
+        allowPayLater={Number(booking.amount) <= ADVANCE_PAYMENT_THRESHOLD}
       />
 
       <BottomSheet isOpen={showRateSheet} onClose={() => setShowRateSheet(false)}>

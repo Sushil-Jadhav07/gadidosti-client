@@ -14,6 +14,13 @@ import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 // interval since it's no longer doing the real-time work.
 const POLL_MS = 15000;
 
+// Above this amount, Pay Later is replaced with a mandatory 20% advance (Pay Now for the full
+// amount stays available either way) — mirrors ADVANCE_PAYMENT_THRESHOLD/_PCT in
+// gadidosti-backend's booking.controller.js, which is what actually enforces this; kept in
+// sync manually since there's no shared config endpoint for this yet.
+const ADVANCE_PAYMENT_THRESHOLD = 5000;
+const ADVANCE_PAYMENT_PCT = 0.2;
+
 const statusLabel = (request) => {
   if (request.status === "countered") return "Driver countered — your turn";
   if (request.status === "declined") return "No longer available";
@@ -42,6 +49,9 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
 
   const [showPaymentSheet, setShowPaymentSheet] = useState(false);
   const [paid, setPaid] = useState(false);
+  // Which button opened the sheet — decides both the amount PaymentSheet charges and what
+  // pay_type the /pay call records. Set right before setShowPaymentSheet(true).
+  const [paymentIntent, setPaymentIntent] = useState("full");
 
   // negotiate.stage: "set" (slider) -> "sent" (waiting on the driver for real — no fake reply)
   const [negotiate, setNegotiate] = useState(null);
@@ -139,7 +149,7 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
   const handlePaySuccess = async (paymentMode) => {
     setShowPaymentSheet(false);
     try {
-      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode }, token);
+      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode, pay_type: paymentIntent }, token);
       if (!res?.success) throw new Error(res?.message || "Failed to record payment");
     } catch (err) {
       toast.error(err?.message || "Failed to record payment");
@@ -151,6 +161,10 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     setShowPaymentSheet(false);
     setPaid(true);
   };
+
+  const finalAmount = Number(request.amount || askingPrice || 0);
+  const requiresAdvance = finalAmount > ADVANCE_PAYMENT_THRESHOLD;
+  const advanceAmount = Math.round(finalAmount * ADVANCE_PAYMENT_PCT * 100) / 100;
 
   const isTerminalDeclined = request.status === "declined";
   const isConfirmed = request.status === "accepted";
@@ -190,22 +204,36 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                 {request.driverName ? `Confirmed with ${request.driverName}` : "Driver confirmed"}
               </h2>
               <p className="text-sm text-neutral-400 mb-6">
-                Final price: <span className="font-semibold text-primary">₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}</span>
+                Final price: <span className="font-semibold text-primary">₹{finalAmount.toLocaleString("en-IN")}</span>
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setShowPaymentSheet(true)}
+                  onClick={() => { setPaymentIntent("full"); setShowPaymentSheet(true); }}
                   className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
                 >
                   Pay Now
                 </button>
-                <button
-                  onClick={handlePayLater}
-                  className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
-                >
-                  Pay Later
-                </button>
+                {requiresAdvance ? (
+                  <button
+                    onClick={() => { setPaymentIntent("advance"); setShowPaymentSheet(true); }}
+                    className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
+                  >
+                    Pay {ADVANCE_PAYMENT_PCT * 100}% Advance (₹{advanceAmount.toLocaleString("en-IN")})
+                  </button>
+                ) : (
+                  <button
+                    onClick={handlePayLater}
+                    className="flex-1 py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors"
+                  >
+                    Pay Later
+                  </button>
+                )}
               </div>
+              {requiresAdvance && (
+                <p className="text-xs text-neutral-400 mt-3">
+                  Bookings over ₹{ADVANCE_PAYMENT_THRESHOLD.toLocaleString("en-IN")} need at least a {ADVANCE_PAYMENT_PCT * 100}% advance to confirm — the rest is collected on delivery.
+                </p>
+              )}
             </>
           ) : isConfirmed ? (
             <>
@@ -428,11 +456,13 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
 
       <PaymentSheet
         open={showPaymentSheet}
-        amount={Number(request.amount || askingPrice || 0)}
+        amount={paymentIntent === "advance" ? advanceAmount : finalAmount}
+        title={paymentIntent === "advance" ? `${ADVANCE_PAYMENT_PCT * 100}% Advance` : "Price Summary"}
         phone={user?.phone}
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={handlePayLater}
+        allowPayLater={!requiresAdvance}
       />
     </>
   );

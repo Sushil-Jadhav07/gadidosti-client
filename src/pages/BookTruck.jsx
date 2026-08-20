@@ -393,6 +393,11 @@ export default function BookTruck() {
           distance,
           duration_min: durationMin,
           duration_in_traffic_min: durationInTrafficMin,
+          // Feeds the nearby-truck-count surge (PricingModel.estimate) — omitted entirely
+          // rather than sent as null/undefined when pickup hasn't been geocoded yet.
+          ...(form.pickupLat != null && form.pickupLng != null
+            ? { pickup_lat: form.pickupLat, pickup_lng: form.pickupLng }
+            : {}),
         }, token);
         if (!pricingRes?.success) throw new Error(pricingRes?.message || "Pricing unavailable");
         if (isCurrent()) {

@@ -13,14 +13,14 @@ import {
 // Razorpay-style payment sheet (category list -> method detail -> PIN/processing -> success)
 // purely for UX/demo purposes. It never talks to a bank or card network; the parent creates
 // the booking with payment_status "paid" once onSuccess fires, or "pending" via onPayLater.
-const CATEGORIES = [
+const BASE_CATEGORIES = [
   { id: "recommended", label: "Recommended", Icon: Sparkles },
   { id: "upi", label: "UPI", Icon: Smartphone },
   { id: "cards", label: "Cards", Icon: CreditCard },
   { id: "netbanking", label: "Netbanking", Icon: Landmark },
   { id: "wallet", label: "Wallet", Icon: Wallet },
-  { id: "later", label: "Pay Later", Icon: Clock },
 ];
+const PAY_LATER_CATEGORY = { id: "later", label: "Pay Later", Icon: Clock };
 
 const UPI_APPS = [
   { id: "gpay", label: "Google Pay", Logo: GooglePayImageLogo, ring: true },
@@ -43,7 +43,13 @@ const formatExpiry = (v) => {
   return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
 };
 
-export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, onPayLater }) {
+// allowPayLater (default true) hides the "Pay Later" category entirely — used for bookings
+// above the advance-payment threshold, where a 20% advance is required instead (see
+// ADVANCE_PAYMENT_THRESHOLD in gadidosti-backend's booking.controller.js and RequestDriver.jsx,
+// which is the only caller that ever passes false). title overrides the left summary panel's
+// "Price Summary" label, e.g. to "20% Advance" when `amount` is the advance, not the full price.
+export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, onPayLater, allowPayLater = true, title = "Price Summary" }) {
+  const CATEGORIES = allowPayLater ? [...BASE_CATEGORIES, PAY_LATER_CATEGORY] : BASE_CATEGORIES;
   const [stage, setStage] = useState("methods"); // methods -> pin -> processing -> success
   const [category, setCategory] = useState("recommended");
   const [upiId, setUpiId] = useState("");
@@ -107,7 +113,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
             </div>
 
             <div className="bg-white/10 rounded-xl p-4 mb-3">
-              <p className="text-[11px] text-white/70 mb-1">Price Summary</p>
+              <p className="text-[11px] text-white/70 mb-1">{title}</p>
               <p className="font-poppins font-bold text-2xl">{amountLabel}</p>
             </div>
 
