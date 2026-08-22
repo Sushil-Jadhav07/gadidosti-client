@@ -2,8 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { MapPin, Menu, User, LogOut, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import NotificationBell from "./NotificationBell";
-import ChatBell from "./ChatBell";
 
 export default function TopBar({ title, onMenuClick }) {
   const { user, logout } = useAuth();
@@ -43,12 +41,6 @@ export default function TopBar({ title, onMenuClick }) {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Chat + notification bells */}
-        <ChatBell />
-        <NotificationBell />
-
-        <div className="w-px h-6 bg-neutral-100 mx-1" />
-
         {/* Avatar + dropdown trigger */}
         <div className="relative" ref={dropRef}>
           <button

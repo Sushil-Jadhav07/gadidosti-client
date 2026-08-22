@@ -158,6 +158,9 @@ export const adaptBooking = (booking) => {
     timeline: timeline.length ? timeline : [currentLabel],
     currentStep,
     date: formatDate(booking.date || booking.createdAt),
+    // The raw ISO instant, kept alongside the display-formatted `date` above (which drops
+    // time-of-day) — for anything that needs to show/compare an actual time, not just a date.
+    scheduledAt: booking.date || booking.createdAt || null,
     amount: Number(booking.amount || 0),
     distance: Number(booking.distance || 0),
     weight: Number(booking.weight || 0),

@@ -25,7 +25,7 @@ const PAGE_TITLES = {
   "/profile": "My Profile",
 };
 
-function WebLayout({ children }) {
+function WebLayout({ children, hideTopBar }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const title = PAGE_TITLES[location.pathname]
@@ -47,9 +47,17 @@ function WebLayout({ children }) {
 
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div className="flex-1 md:ml-64 flex flex-col min-h-screen overflow-hidden">
-        <TopBar title={title} onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
+      <div className={`flex-1 md:ml-64 flex flex-col overflow-hidden ${hideTopBar ? "h-screen" : "min-h-screen"}`}>
+        {/* Skipped on wizard-style pages (hideTopBar) that want a distraction-free, full-height
+            flow — BottomNav below still covers mobile navigation either way, so nothing about
+            reaching other pages is actually lost by dropping this. */}
+        {!hideTopBar && <TopBar title={title} onMenuClick={() => setSidebarOpen(true)} />}
+        {/* hideTopBar pages (the booking wizard) get a genuinely bounded, scrollable-but-
+            scrollbar-hidden frame (h-screen above + overflow-y-auto no-scrollbar here) instead
+            of the normal whole-page scroll — the wizard's own layout keeps its content inside
+            this frame's height so nothing here actually needs to scroll, and this is just the
+            safety net for anything (e.g. the broker/driver steps) that runs long. */}
+        <main className={hideTopBar ? "flex-1 min-h-0 overflow-y-auto no-scrollbar" : "flex-1 pb-5 md:pb-0"}>
           {children}
         </main>
         <BottomNav />
@@ -114,7 +122,7 @@ function AppRoutes() {
         path="/book"
         element={
           <ProtectedRoute>
-            <WebLayout>
+            <WebLayout hideTopBar>
               <BookTruck />
             </WebLayout>
           </ProtectedRoute>

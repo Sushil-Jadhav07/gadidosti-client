@@ -2,12 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
-  ArrowRight, ArrowLeft, MapPin, Package, Weight, Hash, ClipboardList, Zap,
+  ArrowRight, ArrowLeft, ArrowDown, MapPin, Package, Weight, Hash, ClipboardList, Zap,
   Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
 import NearbyTrucksMap from "../components/NearbyTrucksMap";
+import MapView from "../components/MapView";
 import ChooseBroker from "./ChooseBroker";
 import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
@@ -568,15 +569,36 @@ export default function BookTruck() {
   const truck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
   const hasSummaryContent = form.transportType || form.pickup || form.drop || form.truckType;
 
-  // Defined once, rendered as its own sticky right-hand column on every step.
-  const bookingSummaryPanel = (
-    <div className="bg-white rounded-2xl shadow-card p-5 md:p-6 lg:sticky lg:top-6">
-      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide mb-4">Booking Summary</p>
+  // Live map — pins fill in as each side gets geocoded (autocomplete selection, "Use current
+  // location", or a city chip), full driving route once both are resolved. Always visible
+  // (a default-centered blank map before anything's filled in) at the top of the Booking
+  // Summary panel below, not a separate card — one combined map+summary panel on every step.
+  const hasPickupCoords = form.pickupLat != null && form.pickupLng != null;
+  const hasDropCoords = form.dropLat != null && form.dropLng != null;
+  const summaryMapRoutes = hasPickupCoords && hasDropCoords ? [{
+    id: "summary-map",
+    origin: { lat: form.pickupLat, lng: form.pickupLng },
+    destination: { lat: form.dropLat, lng: form.dropLng },
+    originLabel: form.pickup,
+    destinationLabel: form.drop,
+  }] : [];
+  const summaryMapMarkers = [
+    ...(hasPickupCoords && !hasDropCoords ? [{ id: "pickup-only", position: { lat: form.pickupLat, lng: form.pickupLng }, color: "blue", title: form.pickup }] : []),
+    ...(hasDropCoords && !hasPickupCoords ? [{ id: "drop-only", position: { lat: form.dropLat, lng: form.dropLng }, color: "green", title: form.drop }] : []),
+  ];
 
-      {!hasSummaryContent ? (
-        <p className="text-sm text-neutral-300 text-center py-6">Your selections will appear here as you go</p>
-      ) : (
-        <div className="space-y-4">
+  // Defined once, rendered as its own sticky right-hand column on every step — a full-bleed
+  // map with the summary as a floating overlay card at the bottom, not a separate section
+  // stacked below the map. h-full so this column stretches to match the left form's height
+  // (grid's items-stretch below); the map is the whole panel, not a strip above some text.
+  const bookingSummaryPanel = (
+    <div className="relative shadow-card overflow-hidden lg:sticky lg:top-6 h-full min-h-[520px]">
+      <MapView routes={summaryMapRoutes} markers={summaryMapMarkers} height="100%" className="absolute inset-0" />
+
+      {hasSummaryContent && (
+        <div className="absolute bottom-4 left-4 right-4 md:right-auto md:w-80 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 max-h-[calc(100%-2rem)] overflow-y-auto">
+          <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-3">Booking Summary</p>
+
           {form.transportType && (
             <div className="flex items-center gap-2">
               {form.transportType === "intra" ? (
@@ -593,13 +615,19 @@ export default function BookTruck() {
           )}
 
           {(form.pickup || form.drop) && (
-            <div className="pt-3 border-t border-neutral-100">
+            <div className="pt-3 mt-3 border-t border-neutral-100">
               <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-1.5">Route</p>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-sm font-semibold text-neutral-800">{form.pickup || "—"}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-neutral-300 flex-shrink-0" />
-                <span className="text-sm font-semibold text-neutral-800">{form.drop || "—"}</span>
-              </div>
+              {form.pickup ? (
+                <p className="text-sm font-semibold text-neutral-800 truncate">{form.pickup}</p>
+              ) : (
+                <p className="text-xs text-neutral-400 italic">Pickup pending</p>
+              )}
+              <ArrowDown className="w-3.5 h-3.5 text-neutral-300 my-1" />
+              {form.drop ? (
+                <p className="text-sm font-semibold text-neutral-800 truncate">{form.drop}</p>
+              ) : (
+                <p className="text-xs text-neutral-400 italic">Drop-off pending</p>
+              )}
               {(form.loadingLocations.length > 0 || form.unloadingLocations.length > 0) && (
                 <p className="text-[11px] text-neutral-400 mt-1.5">
                   +{form.loadingLocations.length} loading, +{form.unloadingLocations.length} unloading stop{(form.loadingLocations.length + form.unloadingLocations.length) === 1 ? "" : "s"}
@@ -608,28 +636,8 @@ export default function BookTruck() {
             </div>
           )}
 
-          {step >= 2 && (
-            <div className="pt-3 border-t border-neutral-100 space-y-1.5">
-              <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-1.5">Load</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-neutral-400">Weight</span>
-                <span className="text-xs font-medium text-neutral-700">{form.weight} Tons</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-neutral-400">Items</span>
-                <span className="text-xs font-medium text-neutral-700">{form.quantity}</span>
-              </div>
-              {form.materialType && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-neutral-400">Material</span>
-                  <span className="text-xs font-medium text-neutral-700">{form.materialType}</span>
-                </div>
-              )}
-            </div>
-          )}
-
           {truck && (
-            <div className="pt-3 border-t border-neutral-100">
+            <div className="pt-3 mt-3 border-t border-neutral-100">
               <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-1.5">Truck</p>
               <div className="flex items-center gap-2">
                 <Truck className="w-4 h-4 text-primary flex-shrink-0" />
@@ -638,7 +646,7 @@ export default function BookTruck() {
             </div>
           )}
 
-          <div className="pt-3 border-t border-neutral-100">
+          <div className="pt-3 mt-3 border-t border-neutral-100">
             <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-1.5">Estimated Price</p>
             {loadingQuote ? (
               <div className="flex items-center gap-2 py-2">
@@ -676,7 +684,10 @@ export default function BookTruck() {
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-neutral-300">Complete route &amp; truck selection to see price</p>
+              <div>
+                <p className="font-poppins font-bold text-2xl text-neutral-300 tabular-nums">₹ --</p>
+                <p className="text-xs text-primary mt-0.5">Pending route completion</p>
+              </div>
             )}
           </div>
         </div>
@@ -694,10 +705,11 @@ export default function BookTruck() {
   }
 
   return (
-    <div className="p-4 md:p-8 animate-page-enter">
-      <div className="max-w-6xl mx-auto">
-        {/* Step Indicator */}
-        <StepIndicator currentStep={step} onStepClick={createdBooking ? undefined : (s) => setStep(s)} />
+    <div className="h-full flex flex-col p-1 animate-page-enter">
+      <div className="w-full flex-1 min-h-0 flex flex-col">
+        {step === 5 && createdBooking ? (
+          <StepIndicator currentStep={step} onStepClick={undefined} />
+        ) : null}
 
         {step === 5 && createdBooking && driverRequest && !showBrokerFallback ? (
           <RequestDriver
@@ -720,19 +732,26 @@ export default function BookTruck() {
             onBack={resetFlow}
           />
         ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-2  items-stretch flex-1 lg:min-h-0">
           {/* Center: Form — wide 2/3-width form + Booking Summary as its own right column,
-              the same layout on every step now (no more narrow-sidebar special case). */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow-card p-5 md:p-8">
+              the same layout on every step now (no more narrow-sidebar special case). On
+              desktop this card is height-bound to the viewport (its flex-col parent chain is
+              capped, not just min-height) — only its own step-content area scrolls internally
+              (overflow-y-auto no-scrollbar below), so the page itself never needs to scroll and
+              the map on the right never has to shrink or scroll to make room. */}
+          <div className="lg:col-span-1 min-w-0 flex flex-col lg:min-h-0">
+            <div className="bg-white shadow-card flex flex-col flex-1 lg:min-h-0 overflow-hidden">
+              <div className="flex-1 lg:min-h-0 overflow-y-auto no-scrollbar p-5 md:p-8">
+              <StepIndicator currentStep={step} onStepClick={(s) => setStep(s)} embedded />
+
               {/* Step 1 - Location (pickup/drop; transport type is auto-detected from the
                   two cities, not chosen here) */}
               {step === 1 && (
                 <div className="animate-page-enter">
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">
-                    Where should we pick up and deliver?
+                    Define Route
                   </h2>
-                  <p className="text-sm text-neutral-400 mb-4">Add accurate addresses — we'll work out Intra vs Inter-City automatically.</p>
+                  <p className="text-sm text-neutral-400 mb-4">Enter the pickup and drop-off to calculate the route and estimate delivery times.</p>
 
                   {/* Pickup/drop entry: a connected rail (dot → dashed line → pin) mirrors the
                       route itself, so the two fields read as one trip instead of two unrelated
@@ -750,7 +769,7 @@ export default function BookTruck() {
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-                            Pickup From
+                            Pick-up Location
                           </label>
                           <button
                             type="button"
@@ -766,7 +785,7 @@ export default function BookTruck() {
                             {locatingPickup ? "Locating..." : "Use current location"}
                           </button>
                         </div>
-                        <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
+                        <div className="flex items-center bg-white border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
                           <PlacesAutocompleteInput
                             value={form.pickup}
                             onChange={(v) => {
@@ -790,9 +809,9 @@ export default function BookTruck() {
 
                       <div>
                         <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
-                          Drop To
+                          Drop-off Location
                         </label>
-                        <div className="flex items-center bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
+                        <div className="flex items-center bg-white border border-neutral-200 rounded-lg px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
                           <PlacesAutocompleteInput
                             value={form.drop}
                             onChange={(v) => {
@@ -917,16 +936,32 @@ export default function BookTruck() {
                       {cities.map((city) => (
                         <button
                           key={city}
-                          onClick={() => {
+                          onClick={async () => {
                             const target = focusedField === "drop" || (!form.pickup && focusedField !== "pickup") ? "drop" : "pickup";
                             updateForm(target, city);
                             // A city chip already tells us the address's city directly — no
                             // geocoding needed to know pickupCity/dropCity for this one.
                             updateForm(target === "drop" ? "dropCity" : "pickupCity", city);
-                            // Coordinates are only known once resolved via Autocomplete/geocoding — a
-                            // quick city-chip pick doesn't carry them, so clear any stale lat/lng.
+                            // Clear any stale lat/lng from whatever was there before, then resolve
+                            // this city's own coordinates (needed for the live map preview below
+                            // and the price-quote effect's straight-line distance) — a plain city
+                            // name still geocodes reliably, unlike a full free-typed address.
                             updateForm(target === "drop" ? "dropLat" : "pickupLat", null);
                             updateForm(target === "drop" ? "dropLng" : "pickupLng", null);
+                            if (mapsLoaded && window.google?.maps) {
+                              try {
+                                const geocoder = new window.google.maps.Geocoder();
+                                const { results } = await geocoder.geocode({ address: city });
+                                const loc = results?.[0]?.geometry?.location;
+                                if (loc) {
+                                  updateForm(target === "drop" ? "dropLat" : "pickupLat", loc.lat());
+                                  updateForm(target === "drop" ? "dropLng" : "pickupLng", loc.lng());
+                                }
+                              } catch {
+                                // Non-fatal — the price-quote effect's own geocoding fallback still
+                                // covers this once a truck category is picked in Step 3.
+                              }
+                            }
                           }}
                           className={`px-3 md:px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
                             form.pickup === city || form.drop === city
@@ -1176,37 +1211,42 @@ export default function BookTruck() {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
 
-            {/* Navigation Buttons */}
-            <div className="flex gap-3 mt-5 md:mt-6 justify-end">
-              {step > 1 && (
+              {/* Navigation Buttons — pinned as the card's own footer, not the page's, so
+                  Back/Next stay put without scrolling even while the step content above
+                  scrolls internally. */}
+              <div className="flex gap-3 justify-end px-5 md:px-8 py-4 border-t border-neutral-100 flex-shrink-0">
+                {step > 1 && (
+                  <button
+                    onClick={() => setStep(step - 1)}
+                    className="px-5 md:px-6 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 active:scale-[0.98] transition-all"
+                  >
+                    Back
+                  </button>
+                )}
                 <button
-                  onClick={() => setStep(step - 1)}
-                  className="px-5 md:px-6 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 active:scale-[0.98] transition-all"
+                  onClick={() => {
+                    if (step === 1) handleValidateLocation();
+                    else if (step < 4) setStep(step + 1);
+                    else handleConfirm();
+                  }}
+                  disabled={!canContinue || confirming || validatingLocation}
+                  className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
                 >
-                  Back
+                  {step === 4 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
+                    : step === 1 ? (validatingLocation ? "Validating..." : "Next Step")
+                    : "Continue"}
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  if (step === 1) handleValidateLocation();
-                  else if (step < 4) setStep(step + 1);
-                  else handleConfirm();
-                }}
-                disabled={!canContinue || confirming || validatingLocation}
-                className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
-              >
-                {step === 4 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
-                  : step === 1 ? (validatingLocation ? "Validating..." : "Continue")
-                  : "Continue"}
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-              </button>
+              </div>
             </div>
           </div>
 
-          {/* Right: Live Booking Summary — its own column on every step. */}
-          <div className="lg:col-span-1">
+          {/* Right: Live Booking Summary — its own column on every step. h-full so the panel's
+              own h-full (map as the flexible fill) has something concrete to stretch against —
+              the grid's items-stretch above only stretches this wrapper, not its content. */}
+          <div className="lg:col-span-1 min-w-0 h-full">
             {bookingSummaryPanel}
           </div>
         </div>

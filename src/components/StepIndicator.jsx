@@ -3,12 +3,14 @@ import { Check } from "lucide-react";
 
 const STEP_NAMES = ["Location", "Load Info", "Truck", "Review", "Broker"];
 
-// Compact and left-aligned (inline-flex, shrink-to-content) rather than stretched full page
-// width — sits as a small top-left badge above the step content instead of spanning the
-// whole row.
-export default function StepIndicator({ currentStep, onStepClick }) {
+// Full-width, steps evenly spread across the whole row (connecting lines are flex-1, not a
+// fixed width) — spans the same width as the form/summary grid below it, instead of sitting
+// as a small shrink-to-content badge in the corner. `embedded` drops this component's own
+// card chrome (bg/shadow/rounded/padding) for when it's nested at the top of a form card that
+// already supplies all of that — standalone usage (the broker/driver-request steps) keeps it.
+export default function StepIndicator({ currentStep, onStepClick, embedded = false }) {
   return (
-    <div className="inline-flex bg-white rounded-2xl shadow-card px-3 md:px-4 py-2.5 mb-6">
+    <div className={embedded ? "w-full pb-4 mb-4 border-b border-neutral-100" : "w-full bg-white rounded-2xl shadow-card px-4 md:px-8 py-4 mb-6"}>
       <div className="flex items-center">
         {[1, 2, 3, 4, 5].map((step, index) => {
           const isDone = step < currentStep;
@@ -61,7 +63,7 @@ export default function StepIndicator({ currentStep, onStepClick }) {
                 </div>
               )}
               {index < 4 && (
-                <div className="w-8 md:w-12 h-0.5 mx-1.5 md:mx-2 mb-4 rounded-full bg-neutral-100 overflow-hidden flex-shrink-0">
+                <div className="flex-1 h-0.5 mx-1.5 md:mx-3 mb-4 rounded-full bg-neutral-100 overflow-hidden">
                   <div
                     className={`h-full rounded-full bg-success transition-all duration-500 ${
                       step < currentStep ? "w-full" : "w-0"
