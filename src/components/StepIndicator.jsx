@@ -1,7 +1,7 @@
 import React from "react";
 import { Check } from "lucide-react";
 
-const STEP_NAMES = ["Location", "Load Info", "Truck", "Review", "Broker"];
+const STEP_NAMES = ["Location", "Load Info", "Truck", "Review", "Negotiation"];
 
 // Full-width, steps evenly spread across the whole row (connecting lines are flex-1, not a
 // fixed width) — spans the same width as the form/summary grid below it, instead of sitting

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Phone, Tag, Clock3, Check, Truck, AlertTriangle, CheckCircle2 } from "lucide-react";
-import BottomSheet from "../components/BottomSheet";
+import { ArrowLeft, Phone, Tag, Clock3, Check, Truck, AlertTriangle, CheckCircle2, MapPin, ClipboardList } from "lucide-react";
 import PaymentSheet from "../components/PaymentSheet";
+import StepIndicator from "../components/StepIndicator";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
@@ -37,7 +37,7 @@ const statusLabel = (request) => {
 // the booking was already broadcast to brokers when it was created, so if this driver declines,
 // times out, or the client gives up waiting, onFallbackToBrokers() just switches the wizard over
 // to ChooseBroker — nothing needs to be re-created.
-export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers }) {
+export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers, onBackToTruckSelection }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
@@ -85,9 +85,37 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     }
   }, [request.status, bookingId]);
 
+  // The "Offer sent — we'll update automatically" panel (negotiate.stage === "sent") is local
+  // UI state, not derived from request.status — so once the driver actually responds (status
+  // moves off "pending", the state it's in right after the client's own counter goes through),
+  // it needs to be explicitly cleared here. Without this the poll/socket update still lands in
+  // `request` correctly, but the client stays stuck looking at "Back" instead of the real
+  // Accept/Counter/Reject buttons for the driver's response, until they click Back themselves.
+  useEffect(() => {
+    if (negotiate?.stage === "sent" && request.status !== "pending") {
+      setNegotiate(null);
+    }
+  }, [request.status]);
+
   useDriverRequestSocket((updated) => {
     if (updated?.id === request.id) setRequest(updated);
   });
+
+  // Cargo details for the Booking Summary column — not passed down from BookTruck (which would
+  // mean threading them through ChooseBroker too, since this same component is also rendered
+  // from there once a broker assigns a driver), so fetched directly off the booking itself.
+  const [bookingDetails, setBookingDetails] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/api/bookings/${bookingId}`, token);
+        if (!cancelled && res?.success && res.data?.booking) setBookingDetails(res.data.booking);
+      } catch { /* Booking Summary just omits cargo details if this fails */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId]);
 
   const openNegotiate = () => {
     const base = Number(request.amount) || Number(askingPrice) || 0;
@@ -122,8 +150,8 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
         res.data?.request?.status === "accepted" ? `Confirmed with ${driverName}!` : `Accepted — waiting for ${driverName} to also confirm.`
       );
     } catch (err) {
-      toast.error(err?.message || "This request is no longer available — showing broker offers instead.");
-      onFallbackToBrokers();
+      toast.error(err?.message || "This request is no longer available.");
+      (onBackToTruckSelection || onFallbackToBrokers)();
     } finally {
       setActing(false);
     }
@@ -137,8 +165,8 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     try {
       const res = await api.patch(`/api/driver-requests/${request.id}/client-reject`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to decline");
-      toast.info("Declined — showing broker offers instead");
-      onFallbackToBrokers();
+      toast.info(onBackToTruckSelection ? "Declined — let's find you another truck." : "Declined — showing broker offers instead");
+      (onBackToTruckSelection || onFallbackToBrokers)();
     } catch (err) {
       toast.error(err?.message || "Failed to decline");
     } finally {
@@ -165,6 +193,9 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
   const finalAmount = Number(request.amount || askingPrice || 0);
   const requiresAdvance = finalAmount > ADVANCE_PAYMENT_THRESHOLD;
   const advanceAmount = Math.round(finalAmount * ADVANCE_PAYMENT_PCT * 100) / 100;
+  // Each side gets at most maxCountersPerSide counter-offers (server-enforced too — see
+  // driverRequest.controller.js) — once used up, only Accept/Decline remain here.
+  const clientCounterLimitReached = (request.clientCountersUsed ?? 0) >= (request.maxCountersPerSide ?? Infinity);
 
   const isTerminalDeclined = request.status === "declined";
   const isConfirmed = request.status === "accepted";
@@ -178,22 +209,82 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
   return (
     <>
       <div>
-        <div className="flex items-center gap-3 mb-1">
-          <button
-            onClick={onBack}
-            className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
-            {request.truckReg ? `Requesting truck ${request.truckReg}` : "Requesting your selected truck"}
-          </h1>
+        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+        <div className="p-5 md:p-8 pb-0">
+          <StepIndicator currentStep={5} onStepClick={undefined} embedded />
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={onBack}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0 -ml-2"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
+              {request.truckReg ? `Requesting truck ${request.truckReg}` : "Requesting your selected truck"}
+            </h1>
+          </div>
+          <p className="text-sm text-neutral-400 mb-6 ml-12">
+            {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
+          </p>
         </div>
-        <p className="text-sm text-neutral-400 mb-6 ml-12">
-          {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
-        </p>
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+          {/* Left: Booking Summary — route + cargo + the live offer, constant across every
+              negotiation state on the right (pending, countered, confirmed, declined...). */}
+          <div className="p-5 md:p-6 border-b lg:border-b-0 lg:border-r border-neutral-100">
+            <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800 mb-4">
+              <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                <ClipboardList className="w-3.5 h-3.5 text-primary" />
+              </span>
+              Booking Summary
+            </p>
 
-        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
+            <div className="flex gap-3">
+              <div className="flex flex-col items-center pt-1 pb-1 flex-shrink-0 w-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-primary flex-shrink-0" />
+                <span className="flex-1 w-0 border-l-2 border-dashed border-neutral-200 my-1" />
+                <MapPin className="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" fillOpacity={0.15} />
+              </div>
+              <div className="flex-1 min-w-0 space-y-2">
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Pickup</p>
+                  <p className="text-sm font-semibold text-neutral-800 truncate">{pickup || bookingDetails?.pickup}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Drop-off</p>
+                  <p className="text-sm font-semibold text-neutral-800 truncate">{drop || bookingDetails?.drop}</p>
+                </div>
+              </div>
+            </div>
+
+            {bookingDetails && (bookingDetails.material || bookingDetails.weight != null) && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-2">Cargo Details</p>
+                <div className="flex items-center justify-between">
+                  {bookingDetails.material && (
+                    <span className="text-xs font-medium text-neutral-700">{bookingDetails.material}</span>
+                  )}
+                  {bookingDetails.weight != null && (
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">
+                      {bookingDetails.weight} {bookingDetails.weightUnit || "Tons"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 pt-4 border-t border-neutral-100">
+              <div className="bg-neutral-50 rounded-xl p-4">
+                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Live Cost Estimate</p>
+                <p className="font-poppins font-bold text-2xl text-primary tabular-nums">
+                  ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}
+                </p>
+                <p className="text-xs text-neutral-400">Current Offer</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: the driver negotiation card itself. */}
+          <div className="p-6 md:p-8 text-center">
           {isConfirmed && !paid ? (
             /* ── Driver confirmed — show payment step ── */
             <>
@@ -276,13 +367,15 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
               </div>
               <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">This driver isn't available</h2>
               <p className="text-sm text-neutral-400 mb-6">
-                Brokers were already notified when you created this booking — let's see who's responded.
+                {onBackToTruckSelection
+                  ? "Neither the driver nor their broker could take this one — let's find you another truck."
+                  : "Brokers were already notified when you created this booking — let's see who's responded."}
               </p>
               <button
-                onClick={onFallbackToBrokers}
+                onClick={onBackToTruckSelection || onFallbackToBrokers}
                 className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
               >
-                See Broker Offers
+                {onBackToTruckSelection ? "Choose a Different Truck" : "See Broker Offers"}
               </button>
             </>
           ) : isYourTurnToConfirm ? (
@@ -348,35 +441,99 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                 {statusLabel(request)}
               </p>
 
-              <p className="font-poppins font-bold text-2xl text-primary mb-6">
-                ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}
-              </p>
+              {negotiate?.stage === "set" ? (
+                /* ── Inline counter-offer slider — same card, not a popup ── */
+                <>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Current Offer</p>
+                  <p className="font-poppins font-bold text-2xl text-primary mb-4">
+                    ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}
+                  </p>
 
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={handleAccept}
-                  disabled={acting}
-                  className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
-                >
-                  {request.status === "countered" ? "Accept This Price" : `Confirm at ₹${Number(request.amount || askingPrice || 0).toLocaleString("en-IN")} Now`}
-                </button>
-                <button
-                  onClick={openNegotiate}
-                  disabled={acting}
-                  className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
-                >
-                  <Tag className="w-4 h-4" /> {request.status === "countered" ? "Counter" : "Propose a Different Price"}
-                </button>
-                {request.status === "countered" && (
+                  <input
+                    type="range"
+                    min={negotiate.min}
+                    max={negotiate.max}
+                    value={offerAmount}
+                    onChange={(e) => setOfferAmount(Number(e.target.value))}
+                    className="w-full accent-primary"
+                  />
+                  <div className="flex items-center justify-between mt-1 mb-3">
+                    <span className="text-xs text-neutral-400">₹{negotiate.min.toLocaleString("en-IN")}</span>
+                    <span className="text-xs text-neutral-400">₹{negotiate.max.toLocaleString("en-IN")}</span>
+                  </div>
+                  <p className="text-sm font-medium text-warning mb-4">Your Counter-Offer: ₹{offerAmount.toLocaleString("en-IN")}</p>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={submitNegotiate}
+                      disabled={acting}
+                      className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                    >
+                      {acting ? "Sending..." : "Send Offer"}
+                    </button>
+                    <button
+                      onClick={handleAccept}
+                      disabled={acting}
+                      className="w-full py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                    >
+                      Confirm at ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")} Now
+                    </button>
+                    <button onClick={closeNegotiate} className="text-xs text-neutral-400 hover:text-neutral-600 hover:underline transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : negotiate?.stage === "sent" ? (
+                /* ── Counter-offer submitted — waiting on a real reply, no fake instant one ── */
+                <>
+                  <p className="text-sm text-neutral-500 mb-4">
+                    Your offer of <span className="font-semibold text-primary">₹{offerAmount.toLocaleString("en-IN")}</span> has been sent — we'll update this screen automatically once {request.driverName || "they"} respond.
+                  </p>
                   <button
-                    onClick={handleReject}
-                    disabled={acting}
-                    className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                    onClick={closeNegotiate}
+                    className="w-full py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
                   >
-                    Reject
+                    Back
                   </button>
-                )}
-              </div>
+                </>
+              ) : (
+                <>
+                  <p className="font-poppins font-bold text-2xl text-primary mb-6">
+                    ₹{Number(request.amount || askingPrice || 0).toLocaleString("en-IN")}
+                  </p>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={handleAccept}
+                      disabled={acting}
+                      className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                    >
+                      {request.status === "countered" ? "Accept This Price" : `Confirm at ₹${Number(request.amount || askingPrice || 0).toLocaleString("en-IN")} Now`}
+                    </button>
+                    {!clientCounterLimitReached && (
+                      <button
+                        onClick={openNegotiate}
+                        disabled={acting}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                      >
+                        <Tag className="w-4 h-4" /> {request.status === "countered" ? "Counter" : "Propose a Different Price"}
+                      </button>
+                    )}
+                    {request.status === "countered" && (
+                      <button
+                        onClick={handleReject}
+                        disabled={acting}
+                        className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        Reject
+                      </button>
+                    )}
+                  </div>
+                  {clientCounterLimitReached && (
+                    <p className="text-xs text-neutral-400 mt-3">You've used both your counter-offers — please accept the current price or find another driver.</p>
+                  )}
+                </>
+              )}
 
               {request.status !== "countered" && (
                 <button onClick={onFallbackToBrokers} className="mt-5 text-xs text-neutral-400 hover:text-neutral-600 hover:underline transition-colors">
@@ -400,59 +557,9 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
             </>
           )}
         </div>
+          </div>
+        </div>
       </div>
-
-      {/* Negotiate sheet */}
-      <BottomSheet isOpen={!!negotiate} onClose={closeNegotiate}>
-        {negotiate?.stage === "set" && (
-          <div>
-            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Negotiate with {request.driverName || "this driver"}</h3>
-            <p className="text-sm text-neutral-400 mb-6">Use the slider to set your offer amount.</p>
-
-            <div className="bg-neutral-50 rounded-xl p-4 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium text-neutral-700">Offer price</span>
-                <span className="font-poppins font-bold text-xl text-success">₹{offerAmount.toLocaleString("en-IN")}</span>
-              </div>
-              <input
-                type="range"
-                min={negotiate.min}
-                max={negotiate.max}
-                value={offerAmount}
-                onChange={(e) => setOfferAmount(Number(e.target.value))}
-                className="w-full accent-success"
-              />
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-xs text-neutral-400">₹{negotiate.min.toLocaleString("en-IN")}</span>
-                <span className="text-xs text-neutral-400">₹{negotiate.max.toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={submitNegotiate}
-              disabled={acting}
-              className="w-full py-3 bg-success text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
-            >
-              {acting ? "Sending..." : "Send Offer"}
-            </button>
-          </div>
-        )}
-
-        {negotiate?.stage === "sent" && (
-          <div className="flex flex-col items-center py-6 text-center">
-            <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mb-4">
-              <Clock3 className="w-7 h-7 text-primary" />
-            </div>
-            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Offer sent to {request.driverName || "the driver"}</h3>
-            <p className="text-sm text-neutral-400 mb-6">
-              We'll update this screen automatically once they respond — this can take a little while, unlike an instant demo reply.
-            </p>
-            <button onClick={closeNegotiate} className="w-full py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
-              Back
-            </button>
-          </div>
-        )}
-      </BottomSheet>
 
       <PaymentSheet
         open={showPaymentSheet}

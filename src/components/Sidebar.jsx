@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle, CheckCheck, PlayCircle, HelpCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -28,6 +29,14 @@ export default function Sidebar({ isOpen, onClose }) {
   const { notifications, unreadCount, loading: notifLoading, markRead, markAllRead } = useNotifications({ limit: 10 });
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
+  // The dropdown itself is portaled to document.body (see below) rather than living inside the
+  // <nav> it's triggered from — that <nav> scrolls (overflow-y-auto), which per the CSS spec
+  // forces overflow-x to auto too, silently clipping this dropdown's `left-full` position off
+  // to the side instead of showing it. Portaling it out sidesteps that entirely. notifPanelRef
+  // covers the portaled panel for the outside-click check below, since it's no longer a DOM
+  // descendant of notifRef's wrapper.
+  const notifPanelRef = useRef(null);
+  const [notifPos, setNotifPos] = useState(null);
   const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
@@ -47,11 +56,24 @@ export default function Sidebar({ isOpen, onClose }) {
 
   useEffect(() => {
     const handler = (e) => {
-      if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false);
+      const inTrigger = notifRef.current && notifRef.current.contains(e.target);
+      const inPanel = notifPanelRef.current && notifPanelRef.current.contains(e.target);
+      if (!inTrigger && !inPanel) setNotifOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  const toggleNotif = () => {
+    setNotifOpen((v) => {
+      const next = !v;
+      if (next && notifRef.current) {
+        const rect = notifRef.current.getBoundingClientRect();
+        setNotifPos({ left: rect.right + 8, bottom: window.innerHeight - rect.bottom });
+      }
+      return next;
+    });
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -107,7 +129,7 @@ export default function Sidebar({ isOpen, onClose }) {
         {/* Notification + Chat — real unread counts, moved here from TopBar.jsx. */}
         <div className="pt-3 space-y-0.5 relative" ref={notifRef}>
           <button
-            onClick={() => setNotifOpen((v) => !v)}
+            onClick={toggleNotif}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-white/50 hover:bg-white/10 hover:text-white"
           >
             <Bell size={18} strokeWidth={1.8} className="flex-shrink-0" />
@@ -119,8 +141,12 @@ export default function Sidebar({ isOpen, onClose }) {
             )}
           </button>
 
-          {notifOpen && (
-            <div className="absolute left-full bottom-0 ml-2 w-80 bg-white border border-neutral-100 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] z-50 overflow-hidden">
+          {notifOpen && notifPos && createPortal(
+            <div
+              ref={notifPanelRef}
+              style={{ position: "fixed", left: notifPos.left, bottom: notifPos.bottom }}
+              className="w-80 bg-white border border-neutral-100 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] z-50 overflow-hidden"
+            >
               <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
                 <p className="text-sm font-bold text-neutral-800">Notifications</p>
                 {unreadCount > 0 && (
@@ -153,7 +179,8 @@ export default function Sidebar({ isOpen, onClose }) {
                   ))
                 )}
               </div>
-            </div>
+            </div>,
+            document.body
           )}
 
           {/* Chat is per-booking (no standalone inbox screen) — same as ChatBell used to,

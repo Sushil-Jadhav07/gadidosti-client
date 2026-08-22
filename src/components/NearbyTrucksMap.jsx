@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { GoogleMap, useJsApiLoader, Marker, Circle, DirectionsService, DirectionsRenderer, TrafficLayer } from "@react-google-maps/api";
 import { io } from "socket.io-client";
 import { Truck as TruckIcon, Check } from "lucide-react";
@@ -40,8 +41,12 @@ const MAP_OPTIONS = {
   // Lets the mouse wheel zoom directly instead of showing Google's "use ctrl+scroll" nag,
   // appropriate here since this map lives in its own fixed-height panel, not a full page.
   gestureHandling: "greedy",
-  styles: MAP_STYLE,
 };
+// The muted style above only applies to this component's own small standalone fallback box
+// (no mapPortalNode) — portaled into the wizard's shared right-hand panel (the normal case),
+// it stays the same default Google colors every other step's map already uses, not a
+// suddenly-different-looking map once Step 3 loads.
+const MAP_OPTIONS_MUTED = { ...MAP_OPTIONS, styles: MAP_STYLE };
 
 // A real teardrop pin with a soft drop shadow (not the tiny legacy "-dot" icon) so
 // pickup/drop are unmistakable against the map — a white core on a solid color, matching
@@ -116,7 +121,19 @@ function useAnimatedPositions(targets) {
 // (re-fetched on radius/category/capacity change) seeds the list and map, then a Socket.IO
 // connection — same server/auth pattern as ChatWindow — streams live position updates for
 // exactly the trucks currently in view, joining/leaving tracking rooms as that set changes.
-export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng, stops = [], truckCategory, capacity, selectedTruckId, onSelectTruck }) {
+export default function NearbyTrucksMap({
+  pickupLat, pickupLng, dropLat, dropLng, stops = [], truckCategory, capacity, selectedTruckId, onSelectTruck,
+  // Real admin-configured per-category starting prices (/api/config/vehicle-types, loaded by
+  // BookTruck) — looked up per truck below so the list can show an approximate price without
+  // fabricating one; a category with no match in truckOptions just omits the price.
+  truckOptions = [],
+  // A DOM node (state, not a ref — see BookTruck's callback ref) to portal the actual Google
+  // Map into, so it can render full-bleed in the wizard's right-hand column instead of the
+  // small inline box this component used to draw on its own. Falls back to the original
+  // inline map (unchanged) when no portal target is given, so this component still works
+  // standalone if used elsewhere.
+  mapPortalNode = null,
+}) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -275,160 +292,192 @@ export default function NearbyTrucksMap({ pickupLat, pickupLng, dropLat, dropLng
     polylineOptions: { strokeColor: "#000000", strokeWeight: 4, strokeOpacity: 0.85 },
   }), []);
 
-  return (
-    <div className="mt-5">
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <p className="text-xs font-semibold text-neutral-700">Trucks near your pickup</p>
-        <div className="flex items-center gap-1">
-          {RADIUS_PRESETS_KM.map((km) => (
-            <button
-              key={km}
-              onClick={() => setRadiusKm(km)}
-              className={`px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors ${
-                radiusKm === km ? "bg-primary text-white" : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-              }`}
-            >
-              {km} km
-            </button>
-          ))}
-        </div>
+  // Real admin-configured starting price for this truck's category (/api/config/vehicle-types)
+  // — "starting" since the actual quote depends on distance/traffic, computed once this truck
+  // is picked. Omitted entirely (never a fabricated number) when the category has no match.
+  const priceFor = (t) => truckOptions.find((o) => o.id === t.category)?.basePrice;
+
+  const listContent = (
+    <div>
+      <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-widest mb-2.5">Trucks near your pickup</p>
+      <div className="flex items-center gap-1.5 mb-3">
+        {RADIUS_PRESETS_KM.map((km) => (
+          <button
+            key={km}
+            type="button"
+            onClick={() => setRadiusKm(km)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+              radiusKm === km ? "bg-primary text-white" : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+            }`}
+          >
+            {km} km
+          </button>
+        ))}
       </div>
 
       {!hasPickup ? (
         <div className="bg-neutral-50 rounded-xl p-4 text-center text-xs text-neutral-400">
           Select a precise pickup address (from the suggestions list in Step 2) to see nearby trucks.
         </div>
+      ) : loadingTrucks && trucks.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10">
+          <span className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+          <p className="text-xs text-neutral-400">Finding trucks nearby...</p>
+        </div>
+      ) : trucksError ? (
+        <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+          <p className="text-xs text-neutral-400">Couldn't load nearby trucks. Try a different radius.</p>
+        </div>
+      ) : sortedTrucks.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+          <TruckIcon className="w-6 h-6 text-neutral-200 mb-1.5" />
+          <p className="text-xs text-neutral-400">No trucks within {radiusKm} km right now. Try a wider radius.</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,260px)_1fr] gap-3">
-          {/* Left: truck list */}
-          <div className="bg-neutral-50 rounded-xl border border-neutral-100 max-h-[300px] overflow-y-auto">
-            {loadingTrucks && trucks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10">
-                <span className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
-                <p className="text-[11px] text-neutral-400">Finding trucks nearby...</p>
-              </div>
-            ) : trucksError ? (
-              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-                <p className="text-[11px] text-neutral-400">Couldn't load nearby trucks. Try a different radius.</p>
-              </div>
-            ) : sortedTrucks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-                <TruckIcon className="w-6 h-6 text-neutral-200 mb-1.5" />
-                <p className="text-[11px] text-neutral-400">No trucks within {radiusKm} km right now. Try a wider radius.</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-neutral-100">
-                {sortedTrucks.map((t) => {
-                  const isSelected = String(selectedTruckId) === String(t.id);
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => onSelectTruck?.(t)}
-                      onMouseEnter={() => setHoveredId(String(t.id))}
-                      onMouseLeave={() => setHoveredId(null)}
-                      className={`w-full p-2 flex items-start gap-2 text-left transition-colors ${
-                        isSelected ? "bg-primary-50" : hoveredId === String(t.id) ? "bg-neutral-100" : "hover:bg-white"
-                      }`}
-                    >
-                      <div className={`w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1 border ${isSelected ? "border-primary" : "border-neutral-100"}`}>
-                        {TRUCK_IMAGES[t.category] ? (
-                          <img src={TRUCK_IMAGES[t.category]} alt={t.category} className="w-full h-full object-contain" />
-                        ) : (
-                          <TruckIcon className="w-4 h-4 text-primary" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs font-semibold text-neutral-800 truncate">{t.registration}</p>
-                          {isSelected && <Check className="w-3 h-3 text-primary flex-shrink-0" strokeWidth={3} />}
-                        </div>
-                        <p className="text-[10px] text-neutral-400 truncate">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[10px] text-neutral-400">{t.capacity}</span>
-                          {t.distanceKm != null && (
-                            <span className="text-[10px] font-semibold text-primary">· {Number(t.distanceKm).toFixed(1)} km</span>
-                          )}
-                          <span className="inline-flex items-center gap-1 text-[9px] text-success ml-auto">
-                            <span className="w-1 h-1 rounded-full bg-success animate-pulse" /> Live
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Right: map */}
-          <div className="relative rounded-xl overflow-hidden border border-neutral-100" style={{ height: "300px" }}>
-            {loadError ? (
-              <div className="h-full flex items-center justify-center bg-neutral-50">
-                <p className="text-xs text-neutral-400">Couldn't load the map right now.</p>
-              </div>
-            ) : !isLoaded ? (
-              <div className="h-full flex flex-col items-center justify-center bg-neutral-50">
-                <span className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
-                <p className="text-xs text-neutral-400">Loading map...</p>
-              </div>
-            ) : (
-              <>
-                <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={13} options={MAP_OPTIONS}>
-                  {/* Google's live traffic layer — congestion coloring plus incident icons
-                      (accidents, closures, construction) drawn directly on the road tiles. */}
-                  <TrafficLayer />
-                  <Circle center={center} radius={radiusKm * 1000} options={circleOptions} />
-                  {center && dropPosition && !directionsRequested && (
-                    <DirectionsService
-                      options={{
-                        origin: center,
-                        destination: dropPosition,
-                        waypoints,
-                        optimizeWaypoints: false,
-                        travelMode: "DRIVING",
-                        // Routes and durations reflect current traffic conditions, not just
-                        // free-flow distance — matching what Ola/Uber factor into their route.
-                        drivingOptions: { departureTime: new Date(), trafficModel: "bestguess" },
-                      }}
-                      callback={(result, status) => {
-                        setDirectionsRequested(true);
-                        if (status === "OK" && result) setDirections(result);
-                      }}
-                    />
-                  )}
-                  {directions && <DirectionsRenderer directions={directions} options={directionsRendererOptions} />}
-                  <Marker position={center} icon={pickupIcon} title="Pickup" zIndex={1000} />
-                  {dropPosition && <Marker position={dropPosition} icon={dropIcon} title="Drop" zIndex={1000} />}
-                  {trucks.map((t) => {
-                    const pos = animatedPositions[String(t.id)];
-                    if (!pos) return null;
-                    const isSelected = String(selectedTruckId) === String(t.id);
-                    const isHovered = hoveredId === String(t.id);
-                    const size = isSelected ? 30 : isHovered ? 26 : 20;
-                    return (
-                      <Marker
-                        key={t.id}
-                        position={pos}
-                        title={`${t.registration}${t.distanceKm != null ? ` · ${Number(t.distanceKm).toFixed(1)} km away` : ""}`}
-                        zIndex={isSelected ? 1000 : isHovered ? 999 : undefined}
-                        icon={truckIcons[`${t.category}-${size}`]}
-                        onClick={() => onSelectTruck?.(t)}
-                      />
-                    );
-                  })}
-                </GoogleMap>
-                {loadingTrucks && trucks.length > 0 && (
-                  <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-card">
-                    <span className="w-3 h-3 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                    <span className="text-[10px] text-neutral-500">Updating...</span>
-                  </div>
+        <div className="space-y-2.5">
+          {sortedTrucks.map((t) => {
+            const isSelected = String(selectedTruckId) === String(t.id);
+            const price = priceFor(t);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelectTruck?.(t)}
+                onMouseEnter={() => setHoveredId(String(t.id))}
+                onMouseLeave={() => setHoveredId(null)}
+                className={`relative w-full p-3.5 flex items-start gap-3 text-left rounded-xl border transition-all ${
+                  isSelected ? "border-primary bg-primary-50" : hoveredId === String(t.id) ? "border-neutral-300 bg-neutral-50" : "border-neutral-200 bg-white"
+                }`}
+              >
+                {isSelected && (
+                  <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center shadow-card">
+                    <Check className="w-3 h-3" strokeWidth={3} />
+                  </span>
                 )}
-              </>
-            )}
-          </div>
+                <div className="w-14 h-14 rounded-lg bg-white flex items-center justify-center flex-shrink-0 p-1.5 border border-neutral-100">
+                  {TRUCK_IMAGES[t.category] ? (
+                    <img src={TRUCK_IMAGES[t.category]} alt={t.category} className="w-full h-full object-contain" />
+                  ) : (
+                    <TruckIcon className="w-6 h-6 text-primary" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-neutral-800 truncate">{t.registration}</p>
+                    {price != null && (
+                      <span className="text-sm font-bold text-primary flex-shrink-0 tabular-nums">~₹{Number(price).toLocaleString("en-IN")}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-neutral-400 truncate mt-0.5">{[t.make, t.type].filter(Boolean).join(" · ") || t.type}</p>
+
+                  <div className="flex items-center gap-4 mt-2 pt-2 border-t border-neutral-100">
+                    <div>
+                      <p className="text-[9px] font-semibold text-neutral-300 uppercase tracking-wide">Capacity</p>
+                      <p className="text-[11px] font-medium text-neutral-600">{t.capacity || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold text-neutral-300 uppercase tracking-wide">Distance</p>
+                      <p className="text-[11px] font-medium text-neutral-600">{t.distanceKm != null ? `${Number(t.distanceKm).toFixed(1)} km` : "—"}</p>
+                    </div>
+                    <span className="ml-auto inline-flex items-center gap-1 text-[9px] text-success">
+                      <span className="w-1 h-1 rounded-full bg-success animate-pulse" /> Live
+                    </span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+
+  const mapContent = !hasPickup ? (
+    <div className="h-full flex items-center justify-center bg-neutral-50">
+      <p className="text-sm text-neutral-400 text-center px-6">Select a precise pickup address to see nearby trucks on the map.</p>
+    </div>
+  ) : loadError ? (
+    <div className="h-full flex items-center justify-center bg-neutral-50">
+      <p className="text-sm text-neutral-400">Couldn't load the map right now.</p>
+    </div>
+  ) : !isLoaded ? (
+    <div className="h-full flex flex-col items-center justify-center bg-neutral-50">
+      <span className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+      <p className="text-sm text-neutral-400">Loading map...</p>
+    </div>
+  ) : (
+    <>
+      <GoogleMap mapContainerStyle={{ width: "100%", height: "100%" }} center={center} zoom={13} options={mapPortalNode ? MAP_OPTIONS : MAP_OPTIONS_MUTED}>
+        {/* Google's live traffic layer — congestion coloring plus incident icons
+            (accidents, closures, construction) drawn directly on the road tiles. */}
+        <TrafficLayer />
+        <Circle center={center} radius={radiusKm * 1000} options={circleOptions} />
+        {center && dropPosition && !directionsRequested && (
+          <DirectionsService
+            options={{
+              origin: center,
+              destination: dropPosition,
+              waypoints,
+              optimizeWaypoints: false,
+              travelMode: "DRIVING",
+              // Routes and durations reflect current traffic conditions, not just
+              // free-flow distance — matching what Ola/Uber factor into their route.
+              drivingOptions: { departureTime: new Date(), trafficModel: "bestguess" },
+            }}
+            callback={(result, status) => {
+              setDirectionsRequested(true);
+              if (status === "OK" && result) setDirections(result);
+            }}
+          />
+        )}
+        {directions && <DirectionsRenderer directions={directions} options={directionsRendererOptions} />}
+        <Marker position={center} icon={pickupIcon} title="Pickup" zIndex={1000} />
+        {dropPosition && <Marker position={dropPosition} icon={dropIcon} title="Drop" zIndex={1000} />}
+        {trucks.map((t) => {
+          const pos = animatedPositions[String(t.id)];
+          if (!pos) return null;
+          const isSelected = String(selectedTruckId) === String(t.id);
+          const isHovered = hoveredId === String(t.id);
+          const size = isSelected ? 30 : isHovered ? 26 : 20;
+          return (
+            <Marker
+              key={t.id}
+              position={pos}
+              title={`${t.registration}${t.distanceKm != null ? ` · ${Number(t.distanceKm).toFixed(1)} km away` : ""}`}
+              zIndex={isSelected ? 1000 : isHovered ? 999 : undefined}
+              icon={truckIcons[`${t.category}-${size}`]}
+              onClick={() => onSelectTruck?.(t)}
+            />
+          );
+        })}
+      </GoogleMap>
+      {loadingTrucks && trucks.length > 0 && (
+        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-card">
+          <span className="w-3 h-3 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+          <span className="text-[10px] text-neutral-500">Updating...</span>
+        </div>
+      )}
+    </>
+  );
+
+  // With a portal target (BookTruck's Step 3 right-hand column), the map renders full-bleed
+  // there instead of the small inline box below the list — falls back to the original
+  // side-by-side inline layout if no target was given.
+  if (mapPortalNode) {
+    return (
+      <>
+        {listContent}
+        {createPortal(mapContent, mapPortalNode)}
+      </>
+    );
+  }
+
+  return (
+    <div className="mt-5">
+      {listContent}
+      <div className="relative rounded-xl overflow-hidden border border-neutral-100 mt-3" style={{ height: "300px" }}>
+        {mapContent}
+      </div>
     </div>
   );
 }

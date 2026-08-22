@@ -67,10 +67,10 @@ export const clearStoredDriverRequestId = (bookingId) => {
   try { localStorage.removeItem(driverRequestStorageKey(bookingId)); } catch { /* ignore */ }
 };
 
-// Lets BookTruck.jsx survive a page reload once past Step 4 (the booking already exists by
-// then, so restarting the whole wizard on reload — as it did before — would strand the client
-// mid-negotiation with no way back to that screen short of finding the booking in "My
-// Bookings" and it not actually resuming the negotiation view). sessionStorage (not
+// Lets BookTruck.jsx survive a page reload on ANY step, not just once the booking exists
+// (Step 5+) — before that there's nothing to re-fetch, so `form` itself is what's persisted;
+// from Step 5 onward the booking is the source of truth, so only `bookingId` matters and the
+// form snapshot is ignored on restore (see BookTruck's rehydration effect). sessionStorage (not
 // localStorage) is deliberate — this should only survive a reload of the same tab/session, not
 // linger indefinitely across days once the booking is long since resolved one way or another.
 const BOOKING_WIZARD_STORAGE_KEY = "ssk_booking_wizard";
@@ -82,9 +82,8 @@ export const getStoredBookingWizardState = () => {
   } catch { return null; }
 };
 
-export const setStoredBookingWizardState = (bookingId, step) => {
-  if (!bookingId) return;
-  try { sessionStorage.setItem(BOOKING_WIZARD_STORAGE_KEY, JSON.stringify({ bookingId, step })); } catch { /* ignore */ }
+export const setStoredBookingWizardState = (step, { form, bookingId } = {}) => {
+  try { sessionStorage.setItem(BOOKING_WIZARD_STORAGE_KEY, JSON.stringify({ step, form, bookingId })); } catch { /* ignore */ }
 };
 
 export const clearStoredBookingWizardState = () => {

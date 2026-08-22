@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Phone, Tag, Clock3, Building2 } from "lucide-react";
-import BottomSheet from "../components/BottomSheet";
+import { ArrowLeft, Phone, Tag, Clock3, Building2, MapPin, ClipboardList } from "lucide-react";
+import StepIndicator from "../components/StepIndicator";
 import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
@@ -29,9 +29,9 @@ const RANK = { awaiting_confirmation: 3, countered: 2, pending: 1 };
 
 // Rendered as step 6 of the same booking wizard (BookTruck.jsx) once the booking has been
 // created — never routed to directly. bookingId/bookingNumber/askingPrice/pickup/drop come
-// from the booking BookTruck just created; onBack resets the whole wizard back to step 1
-// (there's no safe "previous step" to return to once the booking already exists — going back
-// to Review and confirming again would create a second, duplicate booking).
+// from the booking BookTruck just created; onBack returns to the Review step rather than
+// resetting the wizard — the booking already exists, so BookTruck's Continue button on Review
+// just returns here again ("Back to Negotiation") instead of re-posting a duplicate booking.
 //
 // Two phases, split into two components so phase 1's hooks (offer polling, both sockets) fully
 // unmount once phase 2 starts instead of lingering alongside it: (1) BrokerNegotiation —
@@ -144,6 +144,22 @@ function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDri
   }, [offers]);
 
   const primaryOffer = offers.find((o) => o.id === primaryOfferId) || null;
+  // Each side gets at most maxCountersPerSide counter-offers (server-enforced too — see
+  // job.controller.js) — once used up, only Accept/Decline remain here.
+  const clientCounterLimitReached = primaryOffer
+    ? (primaryOffer.clientCountersUsed ?? 0) >= (primaryOffer.maxCountersPerSide ?? Infinity)
+    : false;
+
+  // The "Offer sent — we'll update automatically" panel (negotiate.stage === "sent") is local
+  // UI state, not derived from the offer's status — so once the broker actually responds
+  // (status moves off "pending", the state it's in right after the client's own counter goes
+  // through), it needs to be explicitly cleared here, or the client stays stuck looking at
+  // "Back" instead of the real Accept/Counter/Reject buttons until they click Back themselves.
+  useEffect(() => {
+    if (negotiate?.stage === "sent" && primaryOffer && primaryOffer.status !== "pending") {
+      setNegotiate(null);
+    }
+  }, [primaryOffer?.status]);
 
   // ── Phase 2 handoff: discover the driver the broker assigned, once the booking is
   // confirmed. Calls onDriverAssigned so the parent can mount <RequestDriver> and unmount
@@ -170,6 +186,22 @@ function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDri
   useDriverRequestSocket((updated) => {
     if (updated?.bookingId === bookingId) onDriverAssigned(updated);
   });
+
+  // Cargo details for the Booking Summary column — same real fields RequestDriver.jsx's own
+  // Booking Summary card uses, fetched the same way (this component doesn't otherwise receive
+  // material/weight from BookTruck).
+  const [bookingDetails, setBookingDetails] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/api/bookings/${bookingId}`, token);
+        if (!cancelled && res?.success && res.data?.booking) setBookingDetails(res.data.booking);
+      } catch { /* Booking Summary just omits cargo details if this fails */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId]);
 
   const openNegotiate = (offer) => {
     const base = Number(offer.amount) || Number(askingPrice) || 0;
@@ -236,29 +268,89 @@ function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDri
   return (
     <>
       <div>
-        <div className="flex items-center gap-3 mb-1">
-          <button
-            onClick={onBack}
-            className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
-            {primaryOffer?.brokerName ? `Negotiating with ${primaryOffer.brokerName}` : "Finding you a broker"}
-          </h1>
-        </div>
-        <p className="text-sm text-neutral-400 mb-6 ml-12">
-          {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
-        </p>
-
-        {error && (
-          <div className="bg-white rounded-xl shadow-card p-4 text-sm text-danger flex items-center gap-2 mb-4">
-            <span>Couldn't load broker offers.</span>
-            <button onClick={() => fetchOffers()} className="underline">Retry</button>
+        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+        <div className="p-5 md:p-8 pb-0">
+          <StepIndicator currentStep={5} onStepClick={undefined} embedded />
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={onBack}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0 -ml-2"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
+              {primaryOffer?.brokerName ? `Negotiating with ${primaryOffer.brokerName}` : "Finding you a broker"}
+            </h1>
           </div>
-        )}
+          <p className="text-sm text-neutral-400 mb-6 ml-12">
+            {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
+          </p>
 
-        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-card p-6 md:p-8 text-center">
+          {error && (
+            <div className="bg-red-50 rounded-xl p-4 text-sm text-danger flex items-center gap-2 mb-4">
+              <span>Couldn't load broker offers.</span>
+              <button onClick={() => fetchOffers()} className="underline">Retry</button>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+          {/* Left: Booking Summary — same card RequestDriver.jsx uses, constant across every
+              negotiation state on the right (waiting, countered, confirmed...). */}
+          <div className="p-5 md:p-6 border-b lg:border-b-0 lg:border-r border-neutral-100">
+            <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800 mb-4">
+              <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                <ClipboardList className="w-3.5 h-3.5 text-primary" />
+              </span>
+              Booking Summary
+            </p>
+
+            <div className="flex gap-3">
+              <div className="flex flex-col items-center pt-1 pb-1 flex-shrink-0 w-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-primary flex-shrink-0" />
+                <span className="flex-1 w-0 border-l-2 border-dashed border-neutral-200 my-1" />
+                <MapPin className="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" fillOpacity={0.15} />
+              </div>
+              <div className="flex-1 min-w-0 space-y-2">
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Pickup</p>
+                  <p className="text-sm font-semibold text-neutral-800 truncate">{pickup || bookingDetails?.pickup}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Drop-off</p>
+                  <p className="text-sm font-semibold text-neutral-800 truncate">{drop || bookingDetails?.drop}</p>
+                </div>
+              </div>
+            </div>
+
+            {bookingDetails && (bookingDetails.material || bookingDetails.weight != null) && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide mb-2">Cargo Details</p>
+                <div className="flex items-center justify-between">
+                  {bookingDetails.material && (
+                    <span className="text-xs font-medium text-neutral-700">{bookingDetails.material}</span>
+                  )}
+                  {bookingDetails.weight != null && (
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">
+                      {bookingDetails.weight} {bookingDetails.weightUnit || "Tons"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 pt-4 border-t border-neutral-100">
+              <div className="bg-neutral-50 rounded-xl p-4">
+                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Live Cost Estimate</p>
+                <p className="font-poppins font-bold text-2xl text-primary tabular-nums">
+                  ₹{Number(primaryOffer?.amount || askingPrice || 0).toLocaleString("en-IN")}
+                </p>
+                <p className="text-xs text-neutral-400">Current Offer</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: the broker negotiation card itself. */}
+          <div className="p-6 md:p-8 text-center">
           {loading ? (
             <div className="flex flex-col items-center py-10">
               <span className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
@@ -351,35 +443,99 @@ function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDri
                 {primaryOffer.status === "countered" ? "Broker countered — your turn" : "Waiting for broker to respond"}
               </p>
 
-              <p className="font-poppins font-bold text-2xl text-primary mb-6">
-                ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")}
-              </p>
+              {negotiate?.stage === "set" ? (
+                /* ── Inline counter-offer slider — same card, not a popup ── */
+                <>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide">Current Offer</p>
+                  <p className="font-poppins font-bold text-2xl text-primary mb-4">
+                    ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")}
+                  </p>
 
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => handleAccept(primaryOffer)}
-                  disabled={acting}
-                  className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
-                >
-                  {primaryOffer.status === "countered" ? "Accept This Price" : `Confirm at ₹${Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")} Now`}
-                </button>
-                <button
-                  onClick={() => openNegotiate(primaryOffer)}
-                  disabled={acting}
-                  className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
-                >
-                  <Tag className="w-4 h-4" /> {primaryOffer.status === "countered" ? "Counter" : "Propose a Different Price"}
-                </button>
-                {primaryOffer.status === "countered" && (
+                  <input
+                    type="range"
+                    min={negotiate.min}
+                    max={negotiate.max}
+                    value={offerAmount}
+                    onChange={(e) => setOfferAmount(Number(e.target.value))}
+                    className="w-full accent-primary"
+                  />
+                  <div className="flex items-center justify-between mt-1 mb-3">
+                    <span className="text-xs text-neutral-400">₹{negotiate.min.toLocaleString("en-IN")}</span>
+                    <span className="text-xs text-neutral-400">₹{negotiate.max.toLocaleString("en-IN")}</span>
+                  </div>
+                  <p className="text-sm font-medium text-warning mb-4">Your Counter-Offer: ₹{offerAmount.toLocaleString("en-IN")}</p>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={submitNegotiate}
+                      disabled={acting}
+                      className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                    >
+                      {acting ? "Sending..." : "Send Offer"}
+                    </button>
+                    <button
+                      onClick={() => handleAccept(primaryOffer)}
+                      disabled={acting}
+                      className="w-full py-3 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                    >
+                      Confirm at ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")} Now
+                    </button>
+                    <button onClick={closeNegotiate} className="text-xs text-neutral-400 hover:text-neutral-600 hover:underline transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : negotiate?.stage === "sent" ? (
+                /* ── Counter-offer submitted — waiting on a real reply, no fake instant one ── */
+                <>
+                  <p className="text-sm text-neutral-500 mb-4">
+                    Your offer of <span className="font-semibold text-primary">₹{offerAmount.toLocaleString("en-IN")}</span> has been sent — we'll update this screen automatically once {negotiate.offer.brokerName || "they"} respond.
+                  </p>
                   <button
-                    onClick={() => handleReject(primaryOffer)}
-                    disabled={acting}
-                    className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                    onClick={closeNegotiate}
+                    className="w-full py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
                   >
-                    Reject
+                    Back
                   </button>
-                )}
-              </div>
+                </>
+              ) : (
+                <>
+                  <p className="font-poppins font-bold text-2xl text-primary mb-6">
+                    ₹{Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")}
+                  </p>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={() => handleAccept(primaryOffer)}
+                      disabled={acting}
+                      className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                    >
+                      {primaryOffer.status === "countered" ? "Accept This Price" : `Confirm at ₹${Number(primaryOffer.amount || askingPrice || 0).toLocaleString("en-IN")} Now`}
+                    </button>
+                    {!clientCounterLimitReached && (
+                      <button
+                        onClick={() => openNegotiate(primaryOffer)}
+                        disabled={acting}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                      >
+                        <Tag className="w-4 h-4" /> {primaryOffer.status === "countered" ? "Counter" : "Propose a Different Price"}
+                      </button>
+                    )}
+                    {primaryOffer.status === "countered" && (
+                      <button
+                        onClick={() => handleReject(primaryOffer)}
+                        disabled={acting}
+                        className="w-full py-3 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        Reject
+                      </button>
+                    )}
+                  </div>
+                  {clientCounterLimitReached && (
+                    <p className="text-xs text-neutral-400 mt-3">You've used both your counter-offers — please accept the current price or decline.</p>
+                  )}
+                </>
+              )}
 
               {primaryOffer.offerHistory?.length > 1 && (
                 <details className="mt-5 text-left">
@@ -397,59 +553,10 @@ function BrokerNegotiation({ bookingId, askingPrice, pickup, drop, onBack, onDri
             </>
           )}
         </div>
+          </div>
+        </div>
       </div>
 
-      {/* Negotiate sheet */}
-      <BottomSheet isOpen={!!negotiate} onClose={closeNegotiate}>
-        {negotiate?.stage === "set" && (
-          <div>
-            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Negotiate with {negotiate.offer.brokerName || "this broker"}</h3>
-            <p className="text-sm text-neutral-400 mb-6">Use the slider to set your offer amount.</p>
-
-            <div className="bg-neutral-50 rounded-xl p-4 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium text-neutral-700">Offer price</span>
-                <span className="font-poppins font-bold text-xl text-success">₹{offerAmount.toLocaleString("en-IN")}</span>
-              </div>
-              <input
-                type="range"
-                min={negotiate.min}
-                max={negotiate.max}
-                value={offerAmount}
-                onChange={(e) => setOfferAmount(Number(e.target.value))}
-                className="w-full accent-success"
-              />
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-xs text-neutral-400">₹{negotiate.min.toLocaleString("en-IN")}</span>
-                <span className="text-xs text-neutral-400">₹{negotiate.max.toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={submitNegotiate}
-              disabled={acting}
-              className="w-full py-3 bg-success text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
-            >
-              {acting ? "Sending..." : "Negotiate"}
-            </button>
-          </div>
-        )}
-
-        {negotiate?.stage === "sent" && (
-          <div className="flex flex-col items-center py-6 text-center">
-            <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mb-4">
-              <Clock3 className="w-7 h-7 text-primary" />
-            </div>
-            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Offer sent to {negotiate.offer.brokerName || "broker"}</h3>
-            <p className="text-sm text-neutral-400 mb-6">
-              We'll update this screen automatically once they respond — this can take a little while, unlike an instant demo reply.
-            </p>
-            <button onClick={closeNegotiate} className="w-full py-3 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors">
-              Back
-            </button>
-          </div>
-        )}
-      </BottomSheet>
     </>
   );
 }

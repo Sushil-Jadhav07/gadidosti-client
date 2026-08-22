@@ -14,7 +14,7 @@ import RequestDriver from "./RequestDriver";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import {
-  bookingRef, setStoredDriverRequestId, getStoredDriverRequestId, haversineDistanceKm,
+  bookingRef, setStoredDriverRequestId, getStoredDriverRequestId, clearStoredDriverRequestId, haversineDistanceKm,
   getStoredBookingWizardState, setStoredBookingWizardState, clearStoredBookingWizardState,
 } from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
@@ -115,7 +115,14 @@ function MaterialTypeInput({ options, value, onChange, placeholder }) {
 export default function BookTruck() {
   const toast = useToast();
   const token = getToken();
-  const [step, setStep] = useState(1);
+  // Restored synchronously (not via an effect) so there's no flash of an empty Step 1 before
+  // snapping to whatever step/form the client actually had — only for step<5 drafts, since a
+  // step>=5 draft means a real booking exists and is instead restored by re-fetching it (the
+  // mount effect below), not by trusting a stale local form snapshot.
+  const [step, setStep] = useState(() => {
+    const stored = getStoredBookingWizardState();
+    return stored?.step && stored.step < 5 ? stored.step : 1;
+  });
   const [cities, setCities] = useState(FALLBACK_CITIES);
   const [materialTypes, setMaterialTypes] = useState(FALLBACK_MATERIALS);
   const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS);
@@ -132,7 +139,10 @@ export default function BookTruck() {
   const quoteRequestId = useRef(0);
   const [confirming, setConfirming] = useState(false);
   const [validatingLocation, setValidatingLocation] = useState(false);
-  const [form, setForm] = useState(INITIAL_FORM);
+  const [form, setForm] = useState(() => {
+    const stored = getStoredBookingWizardState();
+    return stored?.step && stored.step < 5 && stored.form ? { ...INITIAL_FORM, ...stored.form } : INITIAL_FORM;
+  });
   const [focusedField, setFocusedField] = useState(null);
   // Set once the booking is created at Review-confirm; drives the Choose Broker step, which
   // renders inline in this same wizard instead of navigating to a separate route.
@@ -146,6 +156,11 @@ export default function BookTruck() {
   // flow, which was already kicked off automatically when the booking was created either way.
   const [showBrokerFallback, setShowBrokerFallback] = useState(false);
   const [locatingPickup, setLocatingPickup] = useState(false);
+  // The DOM node NearbyTrucksMap portals its real, truck-populated map into for Step 3 — state
+  // (not a plain ref) so the callback ref below re-renders once the node actually mounts,
+  // letting the summary panel's right-hand column show the same live map instead of the
+  // generic route-only preview it uses on every other step.
+  const [truckMapNode, setTruckMapNode] = useState(null);
   // True only while restoring step 5 after a reload (see the mount effect below) — the wizard
   // shows a loading state instead of Step 1 during this window rather than flashing Step 1
   // before jumping to Step 5 a moment later.
@@ -197,6 +212,15 @@ export default function BookTruck() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keeps the reload-recovery snapshot current on every step/form change, from Step 1 onward —
+  // not just the post-booking-creation case (createdBooking?.id, once it exists). Skipped while
+  // the mount effect above is still restoring a step>=5 draft so it can't be clobbered mid-fetch
+  // by this effect immediately re-saving the (still default) Step 1 state.
+  useEffect(() => {
+    if (rehydrating) return;
+    setStoredBookingWizardState(step, { form, bookingId: createdBooking?.id });
+  }, [step, form, createdBooking, rehydrating]);
 
   // Loaded here (not just inside PlacesAutocompleteInput) so "Use my current location" knows
   // whether window.google.maps.Geocoder is actually ready before it lets the user click it.
@@ -505,9 +529,46 @@ export default function BookTruck() {
       }
 
       setStep(5);
-      if (booking?.id) setStoredBookingWizardState(booking.id, 5);
     } catch (err) {
       toast.error(err?.message || "Failed to confirm booking");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // The direct-pick driver (and their broker, once looped in after a timeout) both declined —
+  // rather than dropping straight into the broker-broadcast flow, let the client pick a
+  // different truck for the SAME booking (still 'pending' — the failed attempt never touched
+  // its status). Clearing selectedTruckId forces a fresh, explicit pick in Step 3 instead of
+  // silently re-requesting the truck that just declined.
+  const handleBackToTruckSelection = () => {
+    if (createdBooking?.id) clearStoredDriverRequestId(createdBooking.id);
+    setDriverRequest(null);
+    setForm((f) => ({ ...f, selectedTruckId: null }));
+    setStep(3);
+  };
+
+  // Re-runs just the request-truck half of handleConfirm against the EXISTING booking — used
+  // when the client picks a new truck after handleBackToTruckSelection, so this doesn't create
+  // a second, duplicate booking the way calling handleConfirm again would.
+  const handleRequestNewTruck = async () => {
+    if (!createdBooking?.id || !form.selectedTruckId) {
+      setStep(5);
+      return;
+    }
+    setConfirming(true);
+    try {
+      const requestRes = await api.post(`/api/bookings/${createdBooking.id}/request-truck`, {
+        truck_id: form.selectedTruckId,
+      }, token);
+      if (!requestRes?.success || !requestRes.data?.request) {
+        throw new Error(requestRes?.message || "Failed to request this truck");
+      }
+      setDriverRequest(requestRes.data.request);
+      setStoredDriverRequestId(createdBooking.id, requestRes.data.request.id);
+      setStep(5);
+    } catch (err) {
+      toast.error(err?.message || "Failed to request this truck — please try another.");
     } finally {
       setConfirming(false);
     }
@@ -592,8 +653,15 @@ export default function BookTruck() {
   // stacked below the map. h-full so this column stretches to match the left form's height
   // (grid's items-stretch below); the map is the whole panel, not a strip above some text.
   const bookingSummaryPanel = (
-    <div className="relative shadow-card overflow-hidden lg:sticky lg:top-6 h-full min-h-[520px]">
-      <MapView routes={summaryMapRoutes} markers={summaryMapMarkers} height="100%" className="absolute inset-0" />
+    <div className="relative rounded-2xl shadow-card overflow-hidden lg:sticky lg:top-6 h-full min-h-[520px]">
+      {step === 3 ? (
+        // Mount point NearbyTrucksMap portals its real, truck-populated map into (see
+        // truckMapNode above) — same full-bleed treatment as MapView below, just a live map
+        // with radius circle, traffic and truck markers instead of a plain route line.
+        <div ref={setTruckMapNode} className="absolute inset-0" />
+      ) : (
+        <MapView routes={summaryMapRoutes} markers={summaryMapMarkers} height="100%" className="absolute inset-0" />
+      )}
 
       {hasSummaryContent && (
         <div className="absolute bottom-4 left-4 right-4 md:right-auto md:w-80 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 max-h-[calc(100%-2rem)] overflow-y-auto">
@@ -707,10 +775,6 @@ export default function BookTruck() {
   return (
     <div className="h-full flex flex-col p-1 animate-page-enter">
       <div className="w-full flex-1 min-h-0 flex flex-col">
-        {step === 5 && createdBooking ? (
-          <StepIndicator currentStep={step} onStepClick={undefined} />
-        ) : null}
-
         {step === 5 && createdBooking && driverRequest && !showBrokerFallback ? (
           <RequestDriver
             bookingId={createdBooking.id}
@@ -719,8 +783,9 @@ export default function BookTruck() {
             pickup={createdBooking.pickup}
             drop={createdBooking.drop}
             initialRequest={driverRequest}
-            onBack={resetFlow}
+            onBack={() => setStep(4)}
             onFallbackToBrokers={() => setShowBrokerFallback(true)}
+            onBackToTruckSelection={handleBackToTruckSelection}
           />
         ) : step === 5 && createdBooking ? (
           <ChooseBroker
@@ -729,7 +794,7 @@ export default function BookTruck() {
             askingPrice={createdBooking.askingPrice}
             pickup={createdBooking.pickup}
             drop={createdBooking.drop}
-            onBack={resetFlow}
+            onBack={() => setStep(4)}
           />
         ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2  items-stretch flex-1 lg:min-h-0">
@@ -739,7 +804,7 @@ export default function BookTruck() {
               capped, not just min-height) — only its own step-content area scrolls internally
               (overflow-y-auto no-scrollbar below), so the page itself never needs to scroll and
               the map on the right never has to shrink or scroll to make room. */}
-          <div className="lg:col-span-1 min-w-0 flex flex-col lg:min-h-0">
+          <div className={`min-w-0 flex flex-col lg:min-h-0 ${step === 4 ? "lg:col-span-2" : "lg:col-span-1"}`}>
             <div className="bg-white shadow-card flex flex-col flex-1 lg:min-h-0 overflow-hidden">
               <div className="flex-1 lg:min-h-0 overflow-y-auto no-scrollbar p-5 md:p-8">
               <StepIndicator currentStep={step} onStepClick={(s) => setStep(s)} embedded />
@@ -1114,6 +1179,8 @@ export default function BookTruck() {
                     dropLng={form.dropLng}
                     stops={[...form.loadingLocations, ...form.unloadingLocations]}
                     selectedTruckId={form.selectedTruckId}
+                    truckOptions={truckOptions}
+                    mapPortalNode={truckMapNode}
                     onSelectTruck={(t) => {
                       updateForm("selectedTruckId", t.id);
                       updateForm("truckType", t.category);
@@ -1132,24 +1199,26 @@ export default function BookTruck() {
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
-                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Booking summary</h2>
+                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Review Booking Details</h2>
                   <p className="text-sm text-neutral-400 mb-6">Please review your booking details before confirming.</p>
 
-                  <div className="space-y-4">
-                    <div className="bg-neutral-50 rounded-xl p-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2 space-y-4">
+                    {/* Route — its own card, same icon-header style as Cargo/Vehicle below. */}
+                    <div className="border border-neutral-100 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Shipment Details</p>
-                        <div className="flex items-center gap-2">
-                          <span className="inline-block text-[11px] font-medium bg-primary-50 text-primary px-2.5 py-0.5 rounded-full">
-                            {form.transportType === "intra" ? "Intra-City" : "Inter-City"}
+                        <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800">
+                          <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <Route className="w-3.5 h-3.5 text-primary" />
                           </span>
-                          <button
-                            onClick={() => setStep(1)}
-                            className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-                          >
-                            <Pencil className="w-3 h-3" /> Edit
-                          </button>
-                        </div>
+                          Route
+                        </p>
+                        <button
+                          onClick={() => setStep(1)}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                        >
+                          <Pencil className="w-3 h-3" /> Edit
+                        </button>
                       </div>
 
                       {/* Same dot → dashed line → pin rail as the pickup/drop step, so this
@@ -1161,53 +1230,159 @@ export default function BookTruck() {
                           <MapPin className="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" fillOpacity={0.15} />
                         </div>
                         <div className="flex-1 min-w-0 space-y-2">
-                          <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.pickup}</p>
+                          <div>
+                            <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Pickup</p>
+                            <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.pickup}</p>
+                          </div>
                           {form.loadingLocations.map((s, i) => (
                             <p key={`l${i}`} className="text-xs text-neutral-500 truncate flex items-center gap-1"><PackagePlus className="w-3 h-3 flex-shrink-0" /> {s.location}</p>
                           ))}
                           {form.unloadingLocations.map((s, i) => (
                             <p key={`u${i}`} className="text-xs text-neutral-500 truncate flex items-center gap-1"><PackageMinus className="w-3 h-3 flex-shrink-0" /> {s.location}</p>
                           ))}
-                          <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.drop}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 pt-3 border-t border-neutral-100 space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-xs text-neutral-400"><Truck className="w-3.5 h-3.5" /> Truck</span>
-                          <span className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-neutral-700">{truck?.name}</span>
-                            <button
-                              onClick={() => setStep(3)}
-                              className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-                            >
-                              <Pencil className="w-3 h-3" /> Edit
-                            </button>
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-xs text-neutral-400"><Weight className="w-3.5 h-3.5" /> Weight</span>
-                          <span className="text-xs font-medium text-neutral-700 tabular-nums">{form.weight} Tons</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-xs text-neutral-400"><Hash className="w-3.5 h-3.5" /> Items</span>
-                          <span className="text-xs font-medium text-neutral-700 tabular-nums">{form.quantity}</span>
-                        </div>
-                        {form.materialType && (
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-1.5 text-xs text-neutral-400"><Package className="w-3.5 h-3.5" /> Material</span>
-                            <span className="text-xs font-medium text-neutral-700">{form.materialType}</span>
+                          <div>
+                            <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Drop-off</p>
+                            <p className="font-poppins font-semibold text-sm text-neutral-800 truncate">{form.drop}</p>
                           </div>
-                        )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-primary-50 border border-primary/10 rounded-xl p-4 flex items-center gap-3">
-                      <span className="w-9 h-9 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-card">
-                        <Zap className="w-4 h-4 text-primary" />
-                      </span>
-                      <p className="text-sm text-neutral-600">Once a driver or broker confirms your booking, you'll choose to pay now or pay later.</p>
+                    {/* Cargo + Vehicle — split into their own cards, side by side. */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="border border-neutral-100 rounded-xl p-4">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800 mb-3">
+                          <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <Package className="w-3.5 h-3.5 text-primary" />
+                          </span>
+                          Cargo
+                        </p>
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Type</span>
+                            <span className="text-xs font-medium text-neutral-700 truncate">{form.materialType || "—"}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Weight</span>
+                            <span className="text-xs font-medium text-neutral-700 tabular-nums">{form.weight} Tons</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Items</span>
+                            <span className="text-xs font-medium text-neutral-700 tabular-nums">{form.quantity}</span>
+                          </div>
+                          {form.notes && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-neutral-400 flex-shrink-0">Notes</span>
+                              <span className="text-xs font-medium text-neutral-700 truncate">{form.notes}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="border border-neutral-100 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800">
+                            <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                              <Truck className="w-3.5 h-3.5 text-primary" />
+                            </span>
+                            Vehicle
+                          </p>
+                          <button
+                            onClick={() => setStep(3)}
+                            className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                          >
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                        </div>
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Type</span>
+                            <span className="text-xs font-medium text-neutral-700 truncate">{truck?.name || "—"}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">Capacity</span>
+                            <span className="text-xs font-medium text-neutral-700 truncate">{truck?.capacity || "—"}</span>
+                          </div>
+                          {form.selectedTruckReg && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Registration</span>
+                              <span className="text-xs font-medium text-neutral-700 truncate">{form.selectedTruckReg}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
+
+                  </div>
+
+                  {/* Right: Cost Breakdown + pay-later note — its own column, same as the
+                      reference's layout (this page has no map, so nothing else takes the
+                      remaining width). */}
+                  <div className="lg:col-span-1 space-y-4">
+                    {/* Real fields straight off /api/bookings/quote's breakdown — only ever
+                        the ones that response actually returned (varies by truck category/
+                        transport type), never invented line items like fuel/insurance/taxes
+                        we have no real figures for. */}
+                    {priceBreakdown && (
+                      <div className="border border-neutral-100 rounded-xl p-4">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800 mb-3">
+                          <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                          </span>
+                          Cost Breakdown
+                        </p>
+                        <div className="space-y-2">
+                          {priceBreakdown.baseFare != null && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Base Fare</span>
+                              <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(priceBreakdown.baseFare).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                          {priceBreakdown.distanceFare != null && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Distance Fare{priceBreakdown.distance ? ` (${priceBreakdown.distance} km)` : ""}</span>
+                              <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(priceBreakdown.distanceFare).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                          {priceBreakdown.totalTruckCost != null && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Truck Cost{priceBreakdown.distance ? ` (${priceBreakdown.distance} km)` : ""}</span>
+                              <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(priceBreakdown.totalTruckCost).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                          {!!priceBreakdown.trafficSurcharge && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Traffic Surcharge</span>
+                              <span className="text-xs font-medium text-amber-600 tabular-nums">+₹{Number(priceBreakdown.trafficSurcharge).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                          {!!priceBreakdown.supplySurcharge && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Demand Surcharge</span>
+                              <span className="text-xs font-medium text-amber-600 tabular-nums">+₹{Number(priceBreakdown.supplySurcharge).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                          {priceBreakdown.platformFee != null && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Platform Fee</span>
+                              <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(priceBreakdown.platformFee).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-100">
+                          <span className="text-sm font-semibold text-neutral-800">Total Estimated</span>
+                          <span className="font-poppins font-bold text-lg text-primary tabular-nums">₹{Number(priceBreakdown.total).toLocaleString("en-IN")}</span>
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-neutral-100 flex items-center gap-3">
+                          <span className="w-9 h-9 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            <Zap className="w-4 h-4 text-primary" />
+                          </span>
+                          <p className="text-xs text-neutral-500">Once a driver or broker confirms your booking, you'll choose to pay now or pay later.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   </div>
                 </div>
               )}
@@ -1229,12 +1404,20 @@ export default function BookTruck() {
                   onClick={() => {
                     if (step === 1) handleValidateLocation();
                     else if (step < 4) setStep(step + 1);
+                    // A truck was (re-)picked after handleBackToTruckSelection cleared
+                    // driverRequest — request it against the existing booking instead of just
+                    // resuming Step 5 with nothing to show there.
+                    else if (createdBooking && !driverRequest && form.selectedTruckId) handleRequestNewTruck();
+                    // Revisiting Review via the Negotiation screen's back arrow means the
+                    // booking already exists — just return to it instead of re-running
+                    // handleConfirm, which would POST a second, duplicate booking.
+                    else if (createdBooking) setStep(5);
                     else handleConfirm();
                   }}
                   disabled={!canContinue || confirming || validatingLocation}
                   className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
                 >
-                  {step === 4 ? (confirming ? "Confirming..." : "Confirm & Choose Broker")
+                  {step === 4 ? (confirming ? "Confirming..." : createdBooking ? "Back to Negotiation" : "Confirm & Proceed to Negotiation")
                     : step === 1 ? (validatingLocation ? "Validating..." : "Next Step")
                     : "Continue"}
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
@@ -1243,12 +1426,16 @@ export default function BookTruck() {
             </div>
           </div>
 
-          {/* Right: Live Booking Summary — its own column on every step. h-full so the panel's
-              own h-full (map as the flexible fill) has something concrete to stretch against —
-              the grid's items-stretch above only stretches this wrapper, not its content. */}
-          <div className="lg:col-span-1 min-w-0 h-full">
-            {bookingSummaryPanel}
-          </div>
+          {/* Right: Live Booking Summary — its own column on every step except Review, which
+              has no map in its reference design and doesn't need one (the Cost Breakdown card
+              already covers the price). h-full so the panel's own h-full (map as the flexible
+              fill) has something concrete to stretch against — the grid's items-stretch above
+              only stretches this wrapper, not its content. */}
+          {step !== 4 && (
+            <div className="lg:col-span-1 min-w-0 h-full">
+              {bookingSummaryPanel}
+            </div>
+          )}
         </div>
         )}
       </div>
