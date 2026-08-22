@@ -236,39 +236,42 @@ export default function BookingDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 md:gap-6 items-start">
         {/* Left: booking detail content */}
         <div className="lg:col-span-3 bg-white rounded-2xl shadow-card overflow-hidden">
-          {/* Gradient Header Banner */}
-          <div
-            className="px-5 md:px-6 pt-5 pb-6 text-white"
-            style={{ background: "linear-gradient(135deg, #1565C0 0%, #1976FF 100%)" }}
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">{booking.pickup}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-white/70" />
-                <span className="text-sm font-medium">{booking.drop}</span>
+          <div className="p-5 md:p-6">
+            {/* Route + at-a-glance stats */}
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div className="flex gap-3 flex-1 min-w-0">
+                <div className="flex flex-col items-center pt-1 pb-1 flex-shrink-0 w-3">
+                  <span className="w-2.5 h-2.5 rounded-full bg-primary flex-shrink-0" />
+                  <span className="flex-1 w-0 border-l-2 border-dashed border-neutral-200 my-1" />
+                  <MapPin className="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" fillOpacity={0.15} />
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <div>
+                    <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Pickup</p>
+                    <p className="text-sm font-semibold text-neutral-800 truncate">{booking.pickup || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold text-neutral-300 uppercase tracking-wide">Drop-off</p>
+                    <p className="text-sm font-semibold text-neutral-800 truncate">{booking.drop || "—"}</p>
+                  </div>
+                </div>
               </div>
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm whitespace-nowrap flex-shrink-0">
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary whitespace-nowrap flex-shrink-0">
                 {booking.status}
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-white/10 rounded-lg py-2 px-3">
-                <p className="text-[10px] text-white/70 flex items-center gap-1"><Ruler className="w-3 h-3" /> Distance</p>
-                <p className="text-sm font-semibold mt-0.5">{booking.distance ? `${booking.distance} km` : "—"}</p>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="bg-neutral-50 rounded-lg py-2 px-3">
+                <p className="text-[10px] text-neutral-400 flex items-center gap-1"><Ruler className="w-3 h-3" /> Distance</p>
+                <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.distance ? `${booking.distance} km` : "—"}</p>
               </div>
-              <div className="bg-white/10 rounded-lg py-2 px-3">
-                <p className="text-[10px] text-white/70 flex items-center gap-1"><Truck className="w-3 h-3" /> Truck</p>
-                <p className="text-sm font-semibold mt-0.5 truncate">{booking.truckType || "—"}</p>
-              </div>
-              <div className="bg-white/10 rounded-lg py-2 px-3">
-                <p className="text-[10px] text-white/70">Amount</p>
-                <p className="text-sm font-semibold mt-0.5">₹{booking.amount.toLocaleString("en-IN")}</p>
+              <div className="bg-neutral-50 rounded-lg py-2 px-3">
+                <p className="text-[10px] text-neutral-400 flex items-center gap-1"><Building2 className="w-3 h-3" /> Transport Type</p>
+                <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.transportType === "intra" ? "Intra-City" : "Inter-City"}</p>
               </div>
             </div>
-          </div>
 
-          <div className="p-5 md:p-6">
             {/* Horizontal Status Timeline */}
             <div className="mb-5">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-3">Status Timeline</p>
@@ -319,60 +322,48 @@ export default function BookingDetail() {
               <OffersPanel booking={booking} onAccepted={handleOfferAccepted} />
             )}
 
-            {/* Info Grid */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <InfoTile icon={User} label="Client" name={booking.clientName || "You"} tint="primary" />
-              {booking.broker && <InfoTile icon={Building2} label="Broker" name={booking.broker} tint="primary" />}
-              {booking.driver?.name && (
-                <InfoTile icon={User} label="Driver" name={booking.driver.name} sub={booking.driver.phone} tint="success" />
-              )}
-              {booking.truckReg && (
-                <InfoTile icon={Truck} label="Truck" name={booking.truckReg} sub={booking.truckType} tint="warning" />
-              )}
-            </div>
-
-            {/* Load Info */}
-            <div className="bg-neutral-50 rounded-lg p-3 mb-4">
-              <p className="text-[10px] text-neutral-400 mb-2">Load Details</p>
-              <div className="flex gap-6">
-                <div>
-                  <p className="text-xs text-neutral-400">Weight</p>
-                  <p className="text-sm font-medium text-neutral-700">
-                    {booking.weight} {booking.weightUnit}
-                  </p>
+            {/* Load Details — three separate small boxes */}
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-3">Load Details</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[10px] text-neutral-400">Weight</p>
+                  <p className="text-sm font-medium text-neutral-700 mt-0.5">{booking.weight} {booking.weightUnit}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-neutral-400">Material</p>
-                  <p className="text-sm font-medium text-neutral-700">{booking.material}</p>
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[10px] text-neutral-400">Material</p>
+                  <p className="text-sm font-medium text-neutral-700 mt-0.5 truncate">{booking.material || "—"}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-neutral-400">Quantity</p>
-                  <p className="text-sm font-medium text-neutral-700">{booking.quantity} items</p>
+                <div className="bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[10px] text-neutral-400">Quantity</p>
+                  <p className="text-sm font-medium text-neutral-700 mt-0.5">{booking.quantity} items</p>
                 </div>
               </div>
             </div>
 
-            {/* Pricing */}
-            <div className="bg-primary-50 rounded-lg p-3 mb-5">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs text-neutral-500">Total Amount</span>
-                <span className="font-poppins font-bold text-lg text-primary">
-                  ₹{booking.amount.toLocaleString("en-IN")}
-                </span>
+            {/* Stakeholders + Asset Details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+              <div className="bg-neutral-50 rounded-lg p-3">
+                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-2">Stakeholders</p>
+                <div className="space-y-2">
+                  <InfoRow icon={User} label="Client" value={booking.clientName || "You"} />
+                  {booking.broker && <InfoRow icon={Building2} label="Broker" value={booking.broker} />}
+                </div>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-neutral-500">Payment Status</span>
-                <span
-                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    booking.paymentStatus === "Paid"
-                      ? "bg-green-50 text-success"
-                      : booking.paymentStatus === "Pending"
-                      ? "bg-orange-50 text-warning"
-                      : "bg-neutral-100 text-neutral-400"
-                  }`}
-                >
-                  {booking.paymentStatus}
-                </span>
+              <div className="bg-neutral-50 rounded-lg p-3">
+                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-2">Asset Details</p>
+                <div className="space-y-2">
+                  {booking.driver?.name ? (
+                    <InfoRow icon={User} label="Driver" value={booking.driver.name} sub={booking.driver.phone} />
+                  ) : (
+                    <InfoRow icon={User} label="Driver" value="Not yet assigned" />
+                  )}
+                  {booking.truckReg ? (
+                    <InfoRow icon={Truck} label="Vehicle" value={booking.truckReg} sub={booking.truckType} />
+                  ) : (
+                    <InfoRow icon={Truck} label="Vehicle" value={booking.truckType || "Not yet assigned"} />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -467,24 +458,6 @@ export default function BookingDetail() {
                   </button>
                 </>
               )}
-              {isDisputable && (
-                <button
-                  onClick={() => setShowDisputeSheet(true)}
-                  className="flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                >
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  Report Issue
-                </button>
-              )}
-              {isCancellable && (
-                <button
-                  onClick={() => setShowCancelSheet(true)}
-                  className="flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                >
-                  <XCircle className="w-4 h-4 flex-shrink-0" />
-                  Cancel
-                </button>
-              )}
             </div>
             {!INVOICE_READY_STATUSES.includes(booking.status) && (
               <p className="text-center text-xs text-neutral-400 italic mt-3">Invoice available once delivery is complete</p>
@@ -492,13 +465,27 @@ export default function BookingDetail() {
           </div>
         </div>
 
-        {/* Right: Route map */}
-        <div className="lg:col-span-2 lg:sticky lg:top-6">
+        {/* Right: Route map + Financial Summary */}
+        <div className="lg:col-span-2 lg:sticky lg:top-6 space-y-5">
           <div className="bg-white rounded-2xl shadow-card overflow-hidden">
-            <div className="p-4 border-b border-neutral-50">
+            <div className="p-4 border-b border-neutral-50 flex items-center justify-between">
               <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5" /> Route
+                <MapPin className="w-3.5 h-3.5" /> Live Route
               </p>
+              {(booking.pickup || hasPickupCoords) && (booking.drop || hasDropCoords) && (
+                <a
+                  href={`https://www.google.com/maps/dir/?api=1&origin=${
+                    hasPickupCoords ? `${booking.pickupLat},${booking.pickupLng}` : encodeURIComponent(booking.pickup)
+                  }&destination=${
+                    hasDropCoords ? `${booking.dropLat},${booking.dropLng}` : encodeURIComponent(booking.drop)
+                  }`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+                >
+                  Full Screen <ArrowRight className="w-3 h-3" />
+                </a>
+              )}
             </div>
             <MapView
               routes={[{
@@ -508,24 +495,88 @@ export default function BookingDetail() {
                 originLabel: booking.pickup,
                 destinationLabel: booking.drop,
               }]}
-              height="340px"
+              height="280px"
             />
-            <div className="p-4 space-y-3">
-              <div className="flex items-start gap-2.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-primary mt-1 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-[10px] text-neutral-400">Pickup</p>
-                  <p className="text-sm text-neutral-700">{booking.pickup || "—"}</p>
-                </div>
+          </div>
+
+          {/* Financial Summary — real fields off the pricing breakdown stored at booking-creation
+              time (same shape BookTruck's own Cost Breakdown reads from /api/bookings/quote);
+              falls back to just the total when an older/manually-priced booking has none. */}
+          <div className="bg-white rounded-2xl shadow-card p-4 md:p-5">
+            <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-3">Financial Summary</p>
+            {booking.pricing ? (
+              <div className="space-y-2 mb-3">
+                {booking.pricing.baseFare != null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Base Rate</span>
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(booking.pricing.baseFare).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+                {booking.pricing.distanceFare != null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Distance Fare</span>
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(booking.pricing.distanceFare).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+                {booking.pricing.totalTruckCost != null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Truck Cost</span>
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(booking.pricing.totalTruckCost).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+                {!!booking.pricing.trafficSurcharge && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Traffic Surcharge</span>
+                    <span className="text-xs font-medium text-amber-600 tabular-nums">+₹{Number(booking.pricing.trafficSurcharge).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+                {booking.pricing.platformFee != null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">Taxes &amp; Fees</span>
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">₹{Number(booking.pricing.platformFee).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-success mt-1 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-[10px] text-neutral-400">Drop</p>
-                  <p className="text-sm text-neutral-700">{booking.drop || "—"}</p>
-                </div>
-              </div>
+            ) : null}
+            <div className="flex items-center justify-between pt-3 border-t border-neutral-100">
+              <span className="text-sm font-semibold text-neutral-800">Total</span>
+              <span className="font-poppins font-bold text-lg text-primary tabular-nums">₹{booking.amount.toLocaleString("en-IN")}</span>
             </div>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-neutral-400">Payment Status</span>
+              <span
+                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  booking.paymentStatus === "Paid"
+                    ? "bg-green-50 text-success"
+                    : booking.paymentStatus === "Pending"
+                    ? "bg-orange-50 text-warning"
+                    : "bg-neutral-100 text-neutral-400"
+                }`}
+              >
+                {booking.paymentStatus}
+              </span>
+            </div>
+
+            {(isCancellable || isDisputable) && (
+              <div className="flex gap-3 mt-4 pt-4 border-t border-neutral-100">
+                {isCancellable && (
+                  <button
+                    onClick={() => setShowCancelSheet(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    <XCircle className="w-4 h-4" /> Cancel Booking
+                  </button>
+                )}
+                {isDisputable && (
+                  <button
+                    onClick={() => setShowDisputeSheet(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-50 transition-colors"
+                  >
+                    <AlertTriangle className="w-4 h-4" /> Contact Support
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -854,21 +905,18 @@ function RateDeliverySheet({ booking, onSubmit, onCancel }) {
   );
 }
 
-function InfoTile({ icon: Icon, label, name, sub, tint = "primary" }) {
-  const tintClasses = tint === "success"
-    ? "bg-success/10 text-success"
-    : tint === "warning"
-    ? "bg-orange-50 text-warning"
-    : "bg-primary-50 text-primary";
-
+// A single labeled row (icon + label + value, optional sub-line) inside the Stakeholders/Asset
+// Details cards — lighter than the old boxed InfoTile grid it replaces, since these now live
+// two-to-a-card instead of each being its own standalone box.
+function InfoRow({ icon: Icon, label, value, sub }) {
   return (
-    <div className="bg-neutral-50 rounded-lg p-3 flex items-start gap-2.5">
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${tintClasses}`}>
-        <Icon className="w-4 h-4" />
+    <div className="flex items-start gap-2.5">
+      <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
+        <Icon className="w-3.5 h-3.5 text-neutral-400" />
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] text-neutral-400 mb-0.5">{label}</p>
-        <p className="text-sm font-medium text-neutral-700 truncate">{name || "—"}</p>
+        <p className="text-[10px] text-neutral-400">{label}</p>
+        <p className="text-sm font-medium text-neutral-700 truncate">{value || "—"}</p>
         {sub && <p className="text-xs text-neutral-400 truncate">{sub}</p>}
       </div>
     </div>

@@ -206,7 +206,7 @@ export default function Profile() {
 
               <button
                 onClick={openEditSheet}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-xs font-medium text-white hover:bg-white/20 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-white/10 border border-white/20 rounded-full text-xs font-medium text-white hover:bg-white/20 transition-colors"
               >
                 <Pencil className="w-3.5 h-3.5" />
                 Edit Profile
@@ -235,7 +235,7 @@ export default function Profile() {
           </div>
 
           {/* Activity Highlights */}
-          <div className="bg-white rounded-xl shadow-card p-5">
+          <div className="bg-white rounded-2xl shadow-card p-5">
             <h4 className="font-poppins font-semibold text-sm text-neutral-700 mb-4">Account Info</h4>
             {statsLoading ? (
               <div className="space-y-3">
@@ -293,22 +293,18 @@ export default function Profile() {
         {/* Right — Settings */}
         <div className="lg:col-span-2 space-y-5">
           {MENU_SECTIONS.map((section) => (
-            <div key={section.title} className="bg-white rounded-xl shadow-card overflow-hidden">
-              <div className="px-5 py-3 bg-neutral-50 border-b border-neutral-100">
-                <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest">
-                  {section.title}
-                </p>
-              </div>
-              <div className="divide-y divide-neutral-50">
+            <div key={section.title}>
+              <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2 px-1">
+                {section.title}
+              </p>
+              <div className="space-y-2">
                 {section.items.map((item) => (
                   <button
                     key={item.label}
                     onClick={() => handleMenuClick(item)}
-                    className="w-full flex items-center gap-4 px-5 h-14 text-left hover:bg-neutral-50 transition-colors group"
+                    className="w-full flex items-center gap-3 bg-white border border-neutral-100 rounded-xl px-4 h-14 text-left hover:bg-neutral-50 transition-colors"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-neutral-50 group-hover:bg-neutral-100 flex items-center justify-center flex-shrink-0 transition-colors">
-                      <item.icon className="w-4 h-4 text-neutral-400 group-hover:text-neutral-600 transition-colors" />
-                    </div>
+                    <item.icon className="w-[18px] h-[18px] text-neutral-400 flex-shrink-0" strokeWidth={1.8} />
                     <span className="flex-1 text-sm font-medium text-neutral-700">{item.label}</span>
                     {item.action === "notifications" && unreadCount > 0 && (
                       <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-danger text-white text-[10px] font-bold rounded-full">
@@ -322,21 +318,14 @@ export default function Profile() {
             </div>
           ))}
 
-          {/* Danger Zone */}
-          <div className="bg-white rounded-xl shadow-card overflow-hidden">
-            <div className="px-5 py-3 bg-neutral-50 border-b border-neutral-100">
-              <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest">Account</p>
-            </div>
-            <button
-              onClick={() => setShowLogoutConfirm(true)}
-              className="w-full flex items-center gap-4 px-5 h-14 text-left hover:bg-red-50 transition-colors group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-red-50 group-hover:bg-red-100 flex items-center justify-center flex-shrink-0 transition-colors">
-                <LogOut className="w-4 h-4 text-danger" />
-              </div>
-              <span className="flex-1 text-sm font-medium text-danger">Sign Out</span>
-            </button>
-          </div>
+          {/* Sign Out — its own row, standing apart from the sectioned menus above. */}
+          <button
+            onClick={() => setShowLogoutConfirm(true)}
+            className="w-full flex items-center justify-center gap-2 bg-white border border-neutral-100 rounded-xl h-14 text-sm font-semibold text-danger hover:bg-red-50 transition-colors"
+          >
+            <LogOut className="w-[18px] h-[18px]" strokeWidth={1.8} />
+            Sign Out
+          </button>
         </div>
       </div>
 
