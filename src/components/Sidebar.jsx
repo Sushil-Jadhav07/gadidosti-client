@@ -90,9 +90,13 @@ export default function Sidebar({ isOpen, onClose }) {
       className={`fixed inset-y-0 left-0 z-40 w-64 flex flex-col bg-secondary transition-transform duration-300
         ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
     >
-      {/* Logo */}
+      {/* Logo — the wordmark itself is dark text, unreadable straight on this dark sidebar
+          (only the blue/green "GD" icon would show); a small white chip behind it keeps the
+          real logo colors intact instead of forcing the whole thing white via a filter. */}
       <div className="flex items-center gap-2 px-4 py-4 border-b border-white/10 flex-shrink-0">
-        <img src="/gadidost-logo.png" alt="GadiDost" className="h-8 w-auto flex-shrink-0" />
+        <div className="bg-white rounded-md px-2 py-1 flex-shrink-0">
+          <img src="/gadidost-logo.png" alt="GadiDost" className="h-6 w-auto" />
+        </div>
         <p className="text-[11px] text-white/40 truncate">Client Portal</p>
       </div>
 

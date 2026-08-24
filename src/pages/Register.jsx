@@ -1,12 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Mail, Phone, Lock, User, Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
 export default function Register() {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { register, googleLogin, isAuthenticated } = useAuth();
   const toast = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -15,6 +17,69 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "", confirm: "" });
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const googleBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (isAuthenticated) navigate("/", { replace: true });
+  }, [isAuthenticated, navigate]);
+
+  // Same unified /api/auth/google endpoint Login.jsx uses — it creates the account on first
+  // sign-in, so "Sign up with Google" and "Sign in with Google" are the exact same call.
+  const credentialHandlerRef = useRef(null);
+  credentialHandlerRef.current = async ({ credential }) => {
+    setError("");
+    setGoogleLoading(true);
+    try {
+      const { user, needs_phone } = await googleLogin(credential);
+      toast.success(`Welcome, ${user.name}!`, "Signed up with Google");
+      navigate("/");
+      if (needs_phone) {
+        setTimeout(() => toast.info("Add your phone number in profile settings for full access."), 600);
+      }
+    } catch (err) {
+      setError(err.message || "Google Sign-Up failed. Please try again.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const clientId = GOOGLE_CLIENT_ID;
+    if (!clientId || clientId.startsWith("your-") || !googleBtnRef.current) return;
+
+    const renderButton = () => {
+      if (!window.google?.accounts?.id || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (res) => credentialHandlerRef.current?.(res),
+      });
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: "outline",
+        size: "large",
+        text: "signup_with",
+        shape: "rectangular",
+        width: googleBtnRef.current.clientWidth || 340,
+      });
+    };
+
+    if (window.google?.accounts?.id) { renderButton(); return; }
+
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", renderButton);
+      return () => existing.removeEventListener("load", renderButton);
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = renderButton;
+    document.head.appendChild(script);
+  }, []);
+
+  const showGoogleBtn = GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith("your-");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -67,14 +132,19 @@ export default function Register() {
   return (
     <div className="min-h-screen flex">
       {/* Left Panel */}
-      <div className="hidden lg:flex flex-col w-[45%] bg-secondary relative overflow-hidden">
+      <div className="hidden lg:flex flex-col lg:w-1/2 bg-secondary relative overflow-hidden">
         <div
           className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse at 30% 40%, rgba(25,118,255,0.25) 0%, transparent 60%)" }}
         />
         <div className="relative z-10 flex flex-col h-full px-12 py-10">
+          {/* The wordmark's own text is dark, unreadable straight on this dark panel (only the
+              blue/green "GD" icon would show) — a white chip keeps the real logo colors intact
+              instead of forcing it all white via a filter. */}
           <div className="flex flex-col items-start gap-2">
-            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-14 w-auto" />
+            <div className="bg-white rounded-lg px-3 py-2 inline-block">
+              <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
+            </div>
             <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Portal</p>
           </div>
           <div className="flex-1 flex flex-col justify-center">
@@ -90,116 +160,128 @@ export default function Register() {
       </div>
 
       {/* Right — Form */}
-      <div className="flex-1 flex items-center justify-center bg-neutral px-6 py-10">
-        <div className="w-full max-w-sm">
+      <div className="w-[55%] lg:w-1/2 flex items-center justify-start bg-neutral px-6 py-10">
+        <div className="w-full ">
           <div className="flex flex-col items-center gap-2 mb-8 lg:hidden">
             <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-12 w-auto" />
             <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Portal</p>
           </div>
 
-          <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1">Create account</h2>
-          <p className="text-sm text-neutral-400 mb-8">Sign up to start booking trucks</p>
+          <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1">Create an account</h2>
+          <p className="text-sm text-neutral-400 mb-8">Enter your details below to get started.</p>
+
+          {showGoogleBtn && (
+            <>
+              <div ref={googleBtnRef} className="w-full flex justify-center" style={{ minHeight: 44 }} />
+              {googleLoading && (
+                <p className="text-xs text-neutral-400 text-center mt-2 flex items-center justify-center gap-1.5">
+                  <span className="w-3 h-3 border border-neutral-300 border-t-primary rounded-full animate-spin" />
+                  Signing up with Google...
+                </p>
+              )}
+
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-neutral-200" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-neutral px-3 text-xs font-semibold text-neutral-400 uppercase tracking-wide">Or register with email</span>
+                </div>
+              </div>
+            </>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Full Name */}
+            <div className="w-full grid grid-cols-2 gap-4"> 
             <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
+                <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
                 Full Name
               </label>
-              <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                <User className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={set("name")}
-                  placeholder="Your full name"
-                  required
-                  autoFocus
-                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                />
-              </div>
+              <input
+                type="text"
+                value={form.name}
+                onChange={set("name")}
+                placeholder="John Doe"
+                required
+                autoFocus
+                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
+              />
+            </div>
+            <div> <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
+                Email Address <span className="text-danger">*</span>
+              </label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={set("email")}
+                placeholder="john@company.com"
+                required
+                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
+              /></div>
             </div>
 
             {/* Email */}
             <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                Email Address <span className="text-danger">*</span>
-              </label>
-              <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                <Mail className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={set("email")}
-                  placeholder="you@example.com"
-                  required
-                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                />
-              </div>
-              <p className="text-[11px] text-neutral-400 mt-1">Used to sign in to your account</p>
+             
             </div>
 
             {/* Phone (optional) */}
             <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                Phone Number <span className="text-neutral-300 font-normal normal-case">(optional)</span>
+              <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
+                Phone Number <span className="text-neutral-400 font-normal">(Optional)</span>
               </label>
-              <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                <Phone className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
-                <span className="text-neutral-400 text-sm mr-1 select-none">+91</span>
-                <input
-                  type="tel"
-                  value={form.phone}
-                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-                  placeholder="10-digit mobile number"
-                  inputMode="numeric"
-                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                />
-              </div>
+              <input
+                type="tel"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+                placeholder="+91 00000 00000"
+                inputMode="numeric"
+                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
+              />
             </div>
 
-            {/* Password */}
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                Password
-              </label>
-              <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
-                <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={set("password")}
-                  placeholder="Min 6 characters"
-                  minLength={6}
-                  required
-                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                />
-                <button type="button" onClick={() => setShowPassword((v) => !v)} className="ml-2 text-neutral-400 hover:text-neutral-600">
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+            {/* Password + Confirm — side by side */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
+                  Password
+                </label>
+                <div className="flex items-center bg-white border border-neutral-200 rounded-xl px-3 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={set("password")}
+                    placeholder="Min 6 characters"
+                    minLength={6}
+                    required
+                    className="flex-1 min-w-0 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                  />
+                  <button type="button" onClick={() => setShowPassword((v) => !v)} className="ml-1.5 text-neutral-400 hover:text-neutral-600 flex-shrink-0">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {/* Confirm Password */}
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                Confirm Password
-              </label>
-              <div className={`flex items-center bg-white border-2 rounded-xl px-4 py-3.5 focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all ${!passwordsMatch ? "border-red-200 focus-within:border-red-400" : "border-neutral-100 focus-within:border-primary"}`}>
-                <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
-                <input
-                  type={showConfirm ? "text" : "password"}
-                  value={form.confirm}
-                  onChange={set("confirm")}
-                  placeholder="Repeat password"
-                  required
-                  className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                />
-                <button type="button" onClick={() => setShowConfirm((v) => !v)} className="ml-2 text-neutral-400 hover:text-neutral-600">
-                  {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+              <div>
+                <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
+                  Confirm Password
+                </label>
+                <div className={`flex items-center bg-white border rounded-xl px-3 py-3.5 focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all ${!passwordsMatch ? "border-red-200 focus-within:border-red-400" : "border-neutral-200 focus-within:border-primary"}`}>
+                  <input
+                    type={showConfirm ? "text" : "password"}
+                    value={form.confirm}
+                    onChange={set("confirm")}
+                    placeholder="Repeat password"
+                    required
+                    className="flex-1 min-w-0 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                  />
+                  <button type="button" onClick={() => setShowConfirm((v) => !v)} className="ml-1.5 text-neutral-400 hover:text-neutral-600 flex-shrink-0">
+                    {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-              {!passwordsMatch && <p className="text-xs text-red-500 mt-1">Passwords do not match</p>}
+              {!passwordsMatch && <p className="col-span-2 text-xs text-red-500 -mt-2">Passwords do not match</p>}
             </div>
 
             {error && (
@@ -208,6 +290,12 @@ export default function Register() {
                 {error}
               </div>
             )}
+
+            <p className="text-xs text-neutral-400">
+              By clicking Create Account, you agree to our{" "}
+              <button type="button" className="text-primary hover:underline">Terms of Service</button> and{" "}
+              <button type="button" className="text-primary hover:underline">Privacy Policy</button>.
+            </p>
 
             <button
               type="submit"
@@ -230,13 +318,8 @@ export default function Register() {
           <p className="text-sm text-neutral-500 text-center mt-6">
             Already have an account?{" "}
             <Link to="/login" className="text-primary font-semibold hover:underline">
-              Sign in
+              Sign In
             </Link>
-          </p>
-
-          <p className="text-[11px] text-neutral-400 mt-4 text-center">
-            By registering, you agree to our{" "}
-            <button className="text-primary hover:underline">Terms &amp; Privacy Policy</button>
           </p>
         </div>
       </div>

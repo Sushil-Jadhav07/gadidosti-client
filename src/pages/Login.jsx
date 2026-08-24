@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Truck, Mail, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
+import { Truck, Mail, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, AlertCircle, Phone, KeyRound } from "lucide-react";
+import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
@@ -15,7 +16,7 @@ const FEATURES = [
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, googleLogin, isAuthenticated } = useAuth();
+  const { login, googleLogin, isAuthenticated, forgotPassword, resetPassword } = useAuth();
   const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -90,6 +91,61 @@ export default function Login() {
 
   const showGoogleBtn = GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith("your-");
 
+  // ── Forgot password — real OTP flow (POST /api/auth/forgot-password then /reset-password,
+  // both already wired up in AuthContext, just never had a screen calling them until now).
+  const [showForgotSheet, setShowForgotSheet] = useState(false);
+  const [fpStage, setFpStage] = useState("phone"); // "phone" -> "reset"
+  const [fpPhone, setFpPhone] = useState("");
+  const [fpOtp, setFpOtp] = useState("");
+  const [fpNewPassword, setFpNewPassword] = useState("");
+  const [fpConfirmPassword, setFpConfirmPassword] = useState("");
+  const [fpLoading, setFpLoading] = useState(false);
+  const [fpError, setFpError] = useState("");
+
+  const openForgotSheet = () => {
+    setFpStage("phone");
+    setFpPhone("");
+    setFpOtp("");
+    setFpNewPassword("");
+    setFpConfirmPassword("");
+    setFpError("");
+    setShowForgotSheet(true);
+  };
+
+  const handleRequestOtp = async (e) => {
+    e.preventDefault();
+    setFpError("");
+    setFpLoading(true);
+    try {
+      await forgotPassword(fpPhone);
+      toast.success("OTP sent — check your phone");
+      setFpStage("reset");
+    } catch (err) {
+      setFpError(err.message || "Failed to send OTP");
+    } finally {
+      setFpLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setFpError("");
+    if (fpNewPassword !== fpConfirmPassword) {
+      setFpError("Passwords do not match");
+      return;
+    }
+    setFpLoading(true);
+    try {
+      await resetPassword(fpPhone, fpOtp, fpNewPassword);
+      toast.success("Password reset — please sign in");
+      setShowForgotSheet(false);
+    } catch (err) {
+      setFpError(err.message || "Failed to reset password");
+    } finally {
+      setFpLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -127,8 +183,13 @@ export default function Login() {
         </div>
 
         <div className="relative z-10 flex flex-col h-full px-12 py-10">
+          {/* The wordmark's own text is dark, unreadable straight on this dark panel (only the
+              blue/green "GD" icon would show) — a white chip keeps the real logo colors intact
+              instead of forcing it all white via a filter. */}
           <div className="flex flex-col items-start gap-2">
-            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-14 w-auto" />
+            <div className="bg-white rounded-lg px-3 py-2 inline-block">
+              <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
+            </div>
             <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Portal</p>
           </div>
 
@@ -174,15 +235,15 @@ export default function Login() {
           </div>
 
           <div className={shake ? "animate-shake" : ""}>
-            <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1">Welcome back</h2>
-            <p className="text-sm text-neutral-400 mb-8">Sign in to manage your shipments</p>
+            <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1 text-center">Welcome back</h2>
+            <p className="text-sm text-neutral-400 mb-8 text-center">Sign in to manage your shipments</p>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
                   Email Address
                 </label>
-                <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
                   <Mail className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
                   <input
                     ref={emailInputRef}
@@ -197,10 +258,15 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                  Password
-                </label>
-                <div className="flex items-center bg-white border-2 border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide">
+                    Password
+                  </label>
+                  <button type="button" onClick={openForgotSheet} className="text-xs font-semibold text-primary hover:underline">
+                    Forgot password?
+                  </button>
+                </div>
+                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
                   <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
                   <input
                     type={showPassword ? "text" : "password"}
@@ -268,10 +334,11 @@ export default function Login() {
               </>
             )}
 
-            <div className="mt-6 p-4 bg-white rounded-xl border border-neutral-100">
-              <p className="text-xs text-neutral-400 mb-2 font-medium">Demo credentials</p>
-              <p className="text-xs text-neutral-600 font-mono">Email: client@gmail.com</p>
-              <p className="text-xs text-neutral-600 font-mono mt-1">Password: client@123</p>
+            <div className="mt-6 p-4 bg-primary-50 rounded-xl text-center">
+              <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">Demo Credentials</p>
+              <p className="text-xs font-mono text-primary">
+                client@gmail.com <span className="text-neutral-300 mx-1.5">|</span> client@123
+              </p>
             </div>
 
             <p className="text-sm text-neutral-500 text-center mt-5">
@@ -288,6 +355,106 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      <BottomSheet isOpen={showForgotSheet} onClose={() => setShowForgotSheet(false)}>
+        {fpStage === "phone" ? (
+          <form onSubmit={handleRequestOtp}>
+            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Reset your password</h3>
+            <p className="text-sm text-neutral-400 mb-5">Enter your phone number and we'll send you an OTP.</p>
+
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Phone Number</label>
+            <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 mb-4 focus-within:border-primary transition-all">
+              <Phone className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="tel"
+                value={fpPhone}
+                onChange={(e) => setFpPhone(e.target.value)}
+                placeholder="Enter your registered phone number"
+                required
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+
+            {fpError && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3 mb-4">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {fpError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={fpLoading}
+              className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {fpLoading ? (
+                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Sending OTP...</>
+              ) : "Send OTP"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleResetPassword}>
+            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Enter OTP &amp; new password</h3>
+            <p className="text-sm text-neutral-400 mb-5">We sent a code to {fpPhone}.</p>
+
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">OTP</label>
+            <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 mb-4 focus-within:border-primary transition-all">
+              <KeyRound className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="text"
+                value={fpOtp}
+                onChange={(e) => setFpOtp(e.target.value)}
+                placeholder="6-digit code"
+                required
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">New Password</label>
+            <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 mb-4 focus-within:border-primary transition-all">
+              <Lock className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="password"
+                value={fpNewPassword}
+                onChange={(e) => setFpNewPassword(e.target.value)}
+                placeholder="Min 6 characters"
+                required
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Confirm Password</label>
+            <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 mb-4 focus-within:border-primary transition-all">
+              <Lock className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="password"
+                value={fpConfirmPassword}
+                onChange={(e) => setFpConfirmPassword(e.target.value)}
+                placeholder="Repeat new password"
+                required
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+              />
+            </div>
+
+            {fpError && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3 mb-4">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {fpError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={fpLoading}
+              className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {fpLoading ? (
+                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Resetting...</>
+              ) : "Reset Password"}
+            </button>
+          </form>
+        )}
+      </BottomSheet>
     </div>
   );
 }
