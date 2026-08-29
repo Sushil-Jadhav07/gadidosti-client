@@ -74,3 +74,59 @@ export function BankLogo({ className = "w-6 h-6" }) {
     </svg>
   );
 }
+
+// ── Card network marks (used by SavedAddresses/PaymentMethods' live brand detection) ──
+
+export function AmexLogo({ className = "h-4" }) {
+  return (
+    <svg viewBox="0 0 48 16" className={className}>
+      <rect width="48" height="16" rx="2" fill="#006FCF" />
+      <text x="24" y="11.5" textAnchor="middle" fontSize="7" fontWeight="800" fill="#fff" fontFamily="Arial, sans-serif">AMEX</text>
+    </svg>
+  );
+}
+
+export function DiscoverLogo({ className = "h-4" }) {
+  return (
+    <svg viewBox="0 0 48 16" className={className}>
+      <rect width="48" height="16" rx="2" fill="#1A1A1A" />
+      <circle cx="40" cy="8" r="7" fill="#FF6000" />
+      <text x="19" y="11.5" textAnchor="middle" fontSize="6.5" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">DISCOVER</text>
+    </svg>
+  );
+}
+
+export function JcbLogo({ className = "h-4" }) {
+  return (
+    <svg viewBox="0 0 48 16" className={className}>
+      <rect width="15" height="16" rx="2" fill="#0E4C96" />
+      <rect x="16.5" width="15" height="16" rx="2" fill="#C6161C" />
+      <rect x="33" width="15" height="16" rx="2" fill="#009A57" />
+      <text x="24" y="11.5" textAnchor="middle" fontSize="7.5" fontWeight="800" fill="#fff" fontFamily="Arial, sans-serif">JCB</text>
+    </svg>
+  );
+}
+
+export function RupayLogo({ className = "h-4" }) {
+  return (
+    <svg viewBox="0 0 48 16" className={className}>
+      <rect width="48" height="16" rx="2" fill="#fff" stroke="#E2E8F0" />
+      <path d="M0 8h24v8H2a2 2 0 0 1-2-2V8z" fill="#F58220" />
+      <path d="M24 0h22a2 2 0 0 1 2 2v6H24V0z" fill="#00A651" />
+      <text x="24" y="11" textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#1A1A1A" fontFamily="Arial, sans-serif">RuPay</text>
+    </svg>
+  );
+}
+
+export function GenericCardLogo({ className = "h-4 w-6" }) {
+  return (
+    <svg viewBox="0 0 24 16" className={className}>
+      <rect width="24" height="16" rx="2.5" fill="#94A3B8" />
+      <rect y="4" width="24" height="2.5" fill="#64748B" />
+    </svg>
+  );
+}
+
+// Per-bank hand-drawn marks (SbiLogo/HdfcLogo/IciciLogo/AxisLogo/KotakLogo) lived here briefly
+// but were replaced by real bank logos for all 33 RBI-scheduled banks — see lib/indianBanks.js
+// and public/banks/. BankLogo above stays as the generic fallback for anything not in that list.

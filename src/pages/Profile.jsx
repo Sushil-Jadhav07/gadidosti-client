@@ -3,12 +3,12 @@ import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Receipt, MapPin, CreditCard, Bell, Headphones, FileText,
   LogOut, ChevronRight, Phone, Mail, Pencil, Package, Wallet, CalendarDays,
-  Building2, Lock, Eye, EyeOff, AlertCircle, CheckCheck, KeyRound,
+  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { useNotifications, timeAgo } from "../hooks/useNotifications";
+import { useNotifications } from "../hooks/useNotifications";
 import { api, getToken } from "../services/api";
 import { adaptBooking, formatDate } from "../utils";
 
@@ -23,9 +23,9 @@ const MENU_SECTIONS = [
   {
     title: "Account",
     items: [
-      { icon: MapPin, label: "Saved Addresses", action: "coming_soon" },
-      { icon: CreditCard, label: "Payment Methods", action: "coming_soon" },
-      { icon: Bell, label: "Notifications", action: "notifications" },
+      { icon: MapPin, label: "Saved Addresses", path: "/addresses" },
+      { icon: CreditCard, label: "Payment Methods", path: "/payment-methods" },
+      { icon: Bell, label: "Notifications", path: "/notifications" },
       { icon: KeyRound, label: "Change Password", action: "change_password" },
     ],
   },
@@ -145,19 +145,16 @@ export default function Profile() {
     }
   };
 
-  // ── Notifications ──
-  const [showNotifSheet, setShowNotifSheet] = useState(false);
-  const { notifications, unreadCount, loading: notifLoading, fetchNotifications, markRead, markAllRead } = useNotifications();
-
-  useEffect(() => {
-    if (showNotifSheet) fetchNotifications();
-  }, [showNotifSheet, fetchNotifications]);
+  // Unread count still drives the little badge on the "Notifications" menu row below — the
+  // full list itself now lives at /notifications (see Notifications.jsx) instead of a sheet
+  // here, so `auto: false` skips this hook's own poll-on-mount fetch (Notifications.jsx does
+  // its own fetch when it mounts); this one just needs the count, refreshed on every Profile visit.
+  const { unreadCount, fetchNotifications } = useNotifications({ auto: false });
+  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
   const handleMenuClick = (item) => {
     if (item.path) {
       navigate(item.path);
-    } else if (item.action === "notifications") {
-      setShowNotifSheet(true);
     } else if (item.action === "change_password") {
       setPwError("");
       setShowPwSheet(true);
@@ -306,7 +303,7 @@ export default function Profile() {
                   >
                     <item.icon className="w-[18px] h-[18px] text-neutral-400 flex-shrink-0" strokeWidth={1.8} />
                     <span className="flex-1 text-sm font-medium text-neutral-700">{item.label}</span>
-                    {item.action === "notifications" && unreadCount > 0 && (
+                    {item.path === "/notifications" && unreadCount > 0 && (
                       <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-danger text-white text-[10px] font-bold rounded-full">
                         {unreadCount > 9 ? "9+" : unreadCount}
                       </span>
@@ -474,41 +471,6 @@ export default function Profile() {
         </div>
       </BottomSheet>
 
-      {/* Notifications */}
-      <BottomSheet isOpen={showNotifSheet} onClose={() => setShowNotifSheet(false)}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-poppins font-semibold text-lg text-neutral-800">Notifications</h3>
-          {unreadCount > 0 && (
-            <button onClick={markAllRead} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
-              <CheckCheck className="w-3.5 h-3.5" /> Mark all read
-            </button>
-          )}
-        </div>
-        <div className="divide-y divide-neutral-50">
-          {notifLoading ? (
-            <div className="py-10 flex justify-center">
-              <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-            </div>
-          ) : notifications.length === 0 ? (
-            <p className="text-sm text-neutral-400 text-center py-10">No notifications yet</p>
-          ) : (
-            notifications.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => !n.is_read && markRead(n.id)}
-                className={`w-full text-left py-3.5 flex gap-3 ${!n.is_read ? "bg-primary-50 -mx-5 px-5" : ""}`}
-              >
-                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${!n.is_read ? "bg-primary" : "bg-transparent"}`} />
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-neutral-800">{n.title}</p>
-                  <p className="text-xs text-neutral-500 mt-0.5">{n.message}</p>
-                  <p className="text-[11px] text-neutral-300 mt-1">{timeAgo(n.created_at)}</p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </BottomSheet>
     </div>
   );
 }

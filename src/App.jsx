@@ -16,6 +16,9 @@ import MyBookings from "./pages/MyBookings";
 import BookingDetail from "./pages/BookingDetail";
 import TrackShipment from "./pages/TrackShipment";
 import Profile from "./pages/Profile";
+import SavedAddresses from "./pages/SavedAddresses";
+import PaymentMethods from "./pages/PaymentMethods";
+import Notifications from "./pages/Notifications";
 
 const PAGE_TITLES = {
   "/": "Dashboard",
@@ -23,6 +26,9 @@ const PAGE_TITLES = {
   "/bookings": "My Bookings",
   "/track": "Track Shipment",
   "/profile": "My Profile",
+  "/addresses": "Saved Addresses",
+  "/payment-methods": "Payment Methods",
+  "/notifications": "Notifications",
 };
 
 function WebLayout({ children, hideTopBar }) {
@@ -164,6 +170,36 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <Profile />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/addresses"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <SavedAddresses />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payment-methods"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <PaymentMethods />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <Notifications />
             </WebLayout>
           </ProtectedRoute>
         }

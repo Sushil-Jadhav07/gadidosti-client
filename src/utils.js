@@ -24,6 +24,13 @@ const STATUS_LABELS = {
 const PAYMENT_LABELS = {
   paid: "Paid",
   pending: "Pending",
+  // Bookings over the advance threshold can be confirmed with a 20% advance instead of full
+  // payment (see ADVANCE_PAYMENT_THRESHOLD in the backend's booking.controller.js) — 'partial'
+  // was missing here entirely, so a partially-paid booking's paymentStatus displayed as the
+  // raw, unstyled string "partial" instead of a real label, and BookingDetail.jsx's isPayable
+  // check (which compares against the exact string "Pending") silently never matched it either,
+  // hiding the Pay Now button for the remaining balance.
+  partial: "Partial",
   refunded: "Refunded",
 };
 

@@ -205,7 +205,7 @@ export default function BookingDetail() {
   // already taken the job (Confirmed/Assigned/En Route), not just while still "Requested".
   // Past that point, use Report a Problem instead.
   const isCancellable = ["Requested", "Confirmed", "Assigned", "En Route"].includes(booking.status);
-  const isPayable = booking.paymentStatus === "Pending" && booking.status !== "Cancelled";
+  const isPayable = ["Pending", "Partial"].includes(booking.paymentStatus) && booking.status !== "Cancelled";
   const isRatable = ["Delivered", "Completed"].includes(booking.status) && !booking.rating;
   const isDisputable = !["Requested", "Cancelled"].includes(booking.status);
 
@@ -419,7 +419,7 @@ export default function BookingDetail() {
                   className="flex items-center justify-center gap-2 px-3 py-2.5 bg-success text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   <CreditCard className="w-4 h-4 flex-shrink-0" />
-                  Pay Now
+                  {booking.paymentStatus === "Partial" ? "Pay Remaining" : "Pay Now"}
                 </button>
               )}
               {isLive && (
@@ -583,12 +583,15 @@ export default function BookingDetail() {
 
       <PaymentSheet
         open={showPaymentSheet}
-        amount={booking.amount}
+        // A "Partial" booking already paid its 20% advance — charge only what's actually left,
+        // not the full original amount again (amountPaid comes from the same booking projection
+        // that already powers the payment-status badge above).
+        amount={booking.paymentStatus === "Partial" ? Number(booking.amount) - Number(booking.amountPaid || 0) : booking.amount}
         phone={user?.phone}
         onClose={() => setShowPaymentSheet(false)}
         onSuccess={handlePaySuccess}
         onPayLater={() => { setShowPaymentSheet(false); toast.info("You can pay anytime from this page."); }}
-        allowPayLater={Number(booking.amount) <= ADVANCE_PAYMENT_THRESHOLD}
+        allowPayLater={booking.paymentStatus !== "Partial" && Number(booking.amount) <= ADVANCE_PAYMENT_THRESHOLD}
       />
 
       <BottomSheet isOpen={showRateSheet} onClose={() => setShowRateSheet(false)}>

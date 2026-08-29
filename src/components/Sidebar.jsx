@@ -1,9 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle, CheckCheck } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { useNotifications, timeAgo } from "../hooks/useNotifications";
+import { useNotifications } from "../hooks/useNotifications";
 import { api, getToken } from "../services/api";
 
 const NAV_ITEMS = [
@@ -25,18 +24,11 @@ export default function Sidebar({ isOpen, onClose }) {
   const { user, logout } = useAuth();
   const currentPath = location.pathname;
 
-  // Real unread counts — moved here from TopBar.jsx's NotificationBell/ChatBell (removed there).
-  const { notifications, unreadCount, loading: notifLoading, markRead, markAllRead } = useNotifications({ limit: 10 });
-  const [notifOpen, setNotifOpen] = useState(false);
-  const notifRef = useRef(null);
-  // The dropdown itself is portaled to document.body (see below) rather than living inside the
-  // <nav> it's triggered from — that <nav> scrolls (overflow-y-auto), which per the CSS spec
-  // forces overflow-x to auto too, silently clipping this dropdown's `left-full` position off
-  // to the side instead of showing it. Portaling it out sidesteps that entirely. notifPanelRef
-  // covers the portaled panel for the outside-click check below, since it's no longer a DOM
-  // descendant of notifRef's wrapper.
-  const notifPanelRef = useRef(null);
-  const [notifPos, setNotifPos] = useState(null);
+  // Real unread count — moved here from TopBar.jsx's NotificationBell (removed there). The
+  // button just navigates straight to the full Notifications page now (see below) rather than
+  // opening its own preview dropdown, so nothing else from that hook is needed here. limit: 1
+  // since only unread_count (part of every response regardless of limit) is actually used.
+  const { unreadCount } = useNotifications({ limit: 1 });
   const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
@@ -53,27 +45,6 @@ export default function Sidebar({ isOpen, onClose }) {
     const interval = setInterval(fetchUnread, CHAT_POLL_MS);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
-
-  useEffect(() => {
-    const handler = (e) => {
-      const inTrigger = notifRef.current && notifRef.current.contains(e.target);
-      const inPanel = notifPanelRef.current && notifPanelRef.current.contains(e.target);
-      if (!inTrigger && !inPanel) setNotifOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const toggleNotif = () => {
-    setNotifOpen((v) => {
-      const next = !v;
-      if (next && notifRef.current) {
-        const rect = notifRef.current.getBoundingClientRect();
-        setNotifPos({ left: rect.right + 8, bottom: window.innerHeight - rect.bottom });
-      }
-      return next;
-    });
-  };
 
   const handleLogout = async () => {
     await logout();
@@ -130,10 +101,14 @@ export default function Sidebar({ isOpen, onClose }) {
           );
         })}
 
-        {/* Notification + Chat — real unread counts, moved here from TopBar.jsx. */}
-        <div className="pt-3 space-y-0.5 relative" ref={notifRef}>
+        {/* Notification — real unread count, goes straight to the full Notifications page
+            (see pages/Notifications.jsx) rather than a preview dropdown; there used to be one
+            here, but keeping both a live preview list AND the full page was redundant, and
+            navigating away from the dropdown without it fully unmounting first briefly showed
+            both stacked on top of each other. */}
+        <div className="pt-3 space-y-0.5">
           <button
-            onClick={toggleNotif}
+            onClick={() => { navigate("/notifications"); onClose?.(); }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-white/50 hover:bg-white/10 hover:text-white"
           >
             <Bell size={18} strokeWidth={1.8} className="flex-shrink-0" />
@@ -144,48 +119,6 @@ export default function Sidebar({ isOpen, onClose }) {
               </span>
             )}
           </button>
-
-          {notifOpen && notifPos && createPortal(
-            <div
-              ref={notifPanelRef}
-              style={{ position: "fixed", left: notifPos.left, bottom: notifPos.bottom }}
-              className="w-80 bg-white border border-neutral-100 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] z-50 overflow-hidden"
-            >
-              <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
-                <p className="text-sm font-bold text-neutral-800">Notifications</p>
-                {unreadCount > 0 && (
-                  <button onClick={markAllRead} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
-                    <CheckCheck size={13} /> Mark all read
-                  </button>
-                )}
-              </div>
-              <div className="max-h-80 overflow-y-auto divide-y divide-neutral-50">
-                {notifLoading ? (
-                  <div className="py-8 flex justify-center">
-                    <div className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                  </div>
-                ) : notifications.length === 0 ? (
-                  <p className="text-sm text-neutral-400 text-center py-8">No notifications yet</p>
-                ) : (
-                  notifications.map((n) => (
-                    <button
-                      key={n.id}
-                      onClick={() => !n.is_read && markRead(n.id)}
-                      className={`w-full text-left px-4 py-3 hover:bg-neutral-50 transition-colors flex gap-2 ${!n.is_read ? "bg-primary-50" : ""}`}
-                    >
-                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${!n.is_read ? "bg-primary" : "bg-transparent"}`} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-neutral-800 truncate">{n.title}</p>
-                        <p className="text-xs text-neutral-500 mt-0.5 line-clamp-2">{n.message}</p>
-                        <p className="text-[11px] text-neutral-300 mt-1">{timeAgo(n.created_at)}</p>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>,
-            document.body
-          )}
 
           {/* Chat is per-booking (no standalone inbox screen) — same as ChatBell used to,
               this just goes straight to My Bookings instead of opening a preview list. */}

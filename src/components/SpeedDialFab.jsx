@@ -39,7 +39,7 @@ export default function SpeedDialFab({ actions, className = "" }) {
             key={action.label}
             onClick={() => { setOpen(false); action.onClick(); }}
             aria-label={action.label}
-            className="group absolute bottom-0 right-0 w-11 h-11 rounded-full bg-white shadow-card-hover flex items-center justify-center text-primary border border-neutral-100 hover:bg-primary hover:text-white z-30"
+            className="group absolute bottom-0 right-0 w-11 h-11 rounded-full bg-white shadow-card-hover flex items-center justify-center text-primary border border-neutral-100 hover:bg-primary hover:text-white z-30 hover:z-50"
             style={{
               transform: open ? `translate(${dx}px, ${dy}px) scale(1)` : "translate(0, 0) scale(0.4)",
               opacity: open ? 1 : 0,
@@ -48,7 +48,15 @@ export default function SpeedDialFab({ actions, className = "" }) {
             }}
           >
             <action.icon size={18} />
-            {/* Name tooltip — instant on hover, unlike the native title attribute's ~1s delay. */}
+            {/* Name tooltip — instant on hover, unlike the native title attribute's ~1s delay.
+                Every action button sits at the same z-30 and each is its own stacking context
+                (absolute + z-index), so a tooltip's own z-index only ranks it within its parent
+                button's context — it can't out-rank a *different* button's box that happens to
+                overlap it, since that's decided one level up, where every button still ties at
+                z-30 (broken by DOM order: a later, further-left button paints over an earlier
+                one's tooltip). hover:z-50 on the button itself is what actually fixes it — it
+                promotes the whole hovered button (tooltip included) above every sibling only
+                while it's the one being shown, which is exactly when it needs to win. */}
             <span className="pointer-events-none absolute right-full top-1/2 -translate-y-1/2 mr-2.5 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150">
               {action.label}
             </span>

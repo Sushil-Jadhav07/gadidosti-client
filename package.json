@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.8",
+    "credit-card-type": "^10.3.0",
     "firebase": "^12.17.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.0",
