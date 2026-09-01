@@ -29,6 +29,10 @@ const MECHANIC_STATUS_LABELS = {
 // Statuses where the driver is actually en route and worth polling live position for —
 // matches formatBookingStatus's labels (adaptBooking already converts the raw enum).
 const LIVE_TRACKING_LABELS = ["Assigned", "En Route", "Picked Up", "In Transit"];
+// While the driver is still on the way to pickup, the meaningful route is "truck's current
+// position -> pickup" so the client can watch the truck actually approaching, not a static
+// pickup -> drop line that never reflects where the truck really is yet.
+const PRE_PICKUP_LABELS = ["Assigned", "En Route"];
 // Once the cargo's actually been picked up, the meaningful route is "truck's current position
 // -> drop", not the original pickup -> drop line (the truck's already left pickup by now).
 const POST_PICKUP_LABELS = ["Picked Up", "In Transit"];
@@ -163,11 +167,13 @@ export default function TrackShipment() {
     }
   );
 
-  // Throttled live route origin for the post-pickup phase — see POST_PICKUP_LABELS/
-  // ROUTE_ORIGIN_UPDATE_THRESHOLD_M above for why this only updates on real movement.
+  // Throttled live route origin — the truck's own position becomes the route's origin any time
+  // it's actually en route (both pre- and post-pickup), so the drawn path always shows where the
+  // truck really is instead of a static pickup/drop line. See ROUTE_ORIGIN_UPDATE_THRESHOLD_M
+  // above for why this only updates on real movement.
   const [liveRouteOrigin, setLiveRouteOrigin] = useState(null);
   useEffect(() => {
-    if (!POST_PICKUP_LABELS.includes(activeBooking?.status) || tracking?.driverLat == null || tracking?.driverLng == null) {
+    if (!LIVE_TRACKING_LABELS.includes(activeBooking?.status) || tracking?.driverLat == null || tracking?.driverLng == null) {
       setLiveRouteOrigin(null);
       return;
     }
@@ -204,6 +210,10 @@ export default function TrackShipment() {
   // Extra loading/unloading stops (Ola/Uber-style add-stop) between pickup and drop — empty
   // for the vast majority of bookings, which keeps the rail exactly as it always looked.
   const routeStops = (activeBooking?.stops || []).filter((s) => s.type === "loading" || s.type === "unloading");
+  // Pre-pickup, the truck's route target is the pickup point itself (not drop) and the
+  // loading/unloading stops don't apply yet — they only come into play once the cargo's on
+  // board. See PRE_PICKUP_LABELS above.
+  const isPrePickup = PRE_PICKUP_LABELS.includes(activeBooking?.status);
 
   return (
     <div className="p-4 md:p-8 animate-page-enter">
@@ -453,12 +463,16 @@ export default function TrackShipment() {
                     : activeBooking.pickupLat != null && activeBooking.pickupLng != null
                     ? { lat: Number(activeBooking.pickupLat), lng: Number(activeBooking.pickupLng) }
                     : activeBooking.pickup,
-                  destination: activeBooking.dropLat != null && activeBooking.dropLng != null
+                  destination: isPrePickup && activeBooking.pickupLat != null && activeBooking.pickupLng != null
+                    ? { lat: Number(activeBooking.pickupLat), lng: Number(activeBooking.pickupLng) }
+                    : activeBooking.dropLat != null && activeBooking.dropLng != null
                     ? { lat: Number(activeBooking.dropLat), lng: Number(activeBooking.dropLng) }
                     : activeBooking.drop,
                   originLabel: liveRouteOrigin ? "Your truck" : activeBooking.pickup,
-                  destinationLabel: activeBooking.drop,
-                  waypoints: routeStops
+                  destinationLabel: isPrePickup ? activeBooking.pickup : activeBooking.drop,
+                  // Loading/unloading stops only apply once the cargo's picked up — while the
+                  // truck's still headed to pickup there's nothing to route through yet.
+                  waypoints: isPrePickup ? [] : routeStops
                     .filter((s) => s.lat != null && s.lng != null)
                     .map((s) => ({ location: { lat: Number(s.lat), lng: Number(s.lng) }, stopover: true })),
                 }]}
@@ -470,6 +484,15 @@ export default function TrackShipment() {
                     heading: tracking.driverHeading,
                     iconSize: 44,
                     title: tracking.isTerminal ? "Delivered here" : "Your truck",
+                  }] : []),
+                  // The drop pin would otherwise disappear while pre-pickup, since the route
+                  // itself only spans truck -> pickup during that phase — keep it visible for
+                  // context on where the truck's headed after pickup.
+                  ...(isPrePickup && activeBooking.dropLat != null && activeBooking.dropLng != null ? [{
+                    id: "drop-pin",
+                    position: { lat: Number(activeBooking.dropLat), lng: Number(activeBooking.dropLng) },
+                    color: "green",
+                    title: activeBooking.drop,
                   }] : []),
                   // Numbered stop markers between pickup/drop, matching the rail's order.
                   ...routeStops

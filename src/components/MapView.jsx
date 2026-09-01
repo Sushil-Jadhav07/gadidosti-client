@@ -109,6 +109,23 @@ const MAP_OPTIONS = {
   clickableIcons: false,
 };
 
+// Google-Maps-style "you are here" blue dot (a filled circle with a white ring), not a pin —
+// visually distinct from the pickup/drop/truck markers so it always reads as "your device",
+// never as a stop on the route. Built as a data URI so it needs no extra asset file.
+const MY_LOCATION_ICON = (isLoaded) => {
+  if (!isLoaded || !window.google?.maps) return undefined;
+  return {
+    url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+        <circle cx="11" cy="11" r="9" fill="#1976FF" fill-opacity="0.18"/>
+        <circle cx="11" cy="11" r="6" fill="#1976FF" stroke="white" stroke-width="2.5"/>
+      </svg>`
+    ),
+    scaledSize: new window.google.maps.Size(22, 22),
+    anchor: new window.google.maps.Point(11, 11),
+  };
+};
+
 // One route's directions request + rendered polyline. Origin/destination can be lat/lng
 // objects or plain address/city strings — the Directions API resolves either. Reports back
 // the geocoded start/end points so MapView can still drop pickup/drop pins even when the
@@ -168,7 +185,17 @@ function RouteRenderer({ route, onResolved }) {
 // Directions API) and markers (plain pins) as props so BookTruck/TrackShipment don't each
 // reimplement map plumbing. Loading/error states reuse the same spinner styling used
 // elsewhere in the app (e.g. TrackShipment's own "Loading your shipments..." state).
-export default function MapView({ routes = [], markers = [], height = "400px", className = "", zoom }) {
+export default function MapView({
+  routes = [], markers = [], height = "400px", className = "", zoom,
+  // Renders a Google-Maps-style blue dot at this {lat, lng} — the device's own live position,
+  // kept separate from `markers` so it never gets swept into bounds-fitting or treated as a
+  // route stop. Optional; omit entirely on screens that don't track the viewer's own location.
+  myLocation = null,
+  // Called with {lat, lng} on a map click/tap — lets a screen let the user place a pin directly
+  // (e.g. BookTruck's Step 1, when Places search isn't precise enough). Omit to leave the map
+  // non-interactive, same as before this existed.
+  onMapClick,
+}) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -242,15 +269,26 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
     );
   }
 
+  const handleClick = useCallback((e) => {
+    if (!onMapClick) return;
+    onMapClick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+  }, [onMapClick]);
+
+  const mapOptions = useMemo(
+    () => (onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS),
+    [onMapClick]
+  );
+
   return (
     <GoogleMap
       mapContainerClassName={className}
       mapContainerStyle={{ width: "100%", height }}
-      center={allMarkers[0]?.position || DEFAULT_CENTER}
+      center={allMarkers[0]?.position || myLocation || DEFAULT_CENTER}
       zoom={zoom || 12}
       onLoad={onLoad}
       onUnmount={onUnmount}
-      options={MAP_OPTIONS}
+      onClick={handleClick}
+      options={mapOptions}
     >
       {routes.map((route) => (
         <RouteRenderer key={route.id} route={route} onResolved={handleResolved} />
@@ -264,6 +302,14 @@ export default function MapView({ routes = [], markers = [], height = "400px", c
           label={m.label}
         />
       ))}
+      {myLocation && (
+        <Marker
+          position={myLocation}
+          icon={MY_LOCATION_ICON(isLoaded)}
+          title="Your location"
+          zIndex={1000}
+        />
+      )}
     </GoogleMap>
   );
 }

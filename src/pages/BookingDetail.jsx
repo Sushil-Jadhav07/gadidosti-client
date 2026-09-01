@@ -12,6 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId, shareInvoicePdf } from "../utils";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
+import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
 
 const LIVE_STATUSES = ["Assigned", "En Route", "Picked Up", "In Transit"];
 const INVOICE_READY_STATUSES = ["Delivered", "Completed"];
@@ -45,17 +46,17 @@ export default function BookingDetail() {
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
 
-  const loadBooking = async () => {
-    setLoading(true);
+  const loadBooking = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(false);
     try {
       const res = await api.get(`/api/bookings/${id}`, token);
       if (!res?.success) throw new Error(res?.message || "Failed to load booking");
       setBooking(adaptBooking(res.data?.booking));
     } catch {
-      setError(true);
+      if (!silent) setError(true);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -63,6 +64,15 @@ export default function BookingDetail() {
     loadBooking();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Live push — the moment the driver/broker changes the trip's status (picked up, delivered,
+  // etc.), silently re-fetch this booking so the status badge/timeline update instantly instead
+  // of needing a manual reload. Silent (no loading spinner) since a full-page reload feel would
+  // be jarring for a background push — same pattern as TrackShipment.jsx's own socket usage.
+  useTripStatusSocket((trip) => {
+    if (!trip?.bookingId || trip.bookingId !== id) return;
+    loadBooking({ silent: true });
+  });
 
   const handleCancel = async (reason) => {
     if (!booking) return;

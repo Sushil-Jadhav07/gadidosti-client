@@ -4,6 +4,7 @@ import { Package, AlertTriangle, RefreshCw, Download, Plus, Route as RouteIcon, 
 import StatusBadge from "../components/StatusBadge";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef } from "../utils";
+import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
 
 const FILTER_TABS = ["All", "Active", "In Transit", "Delivered", "Cancelled"];
 // Raw backend status values (see utils.js's STATUS_LABELS) sent as the `status` query param —
@@ -44,8 +45,8 @@ export default function MyBookings() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const loadBookings = async () => {
-    setLoading(true);
+  const loadBookings = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(false);
     try {
       // No backend text-search endpoint — searching pulls a larger real page (still capped at
@@ -75,9 +76,9 @@ export default function MyBookings() {
         setTotal(response.data?.total || 0);
       }
     } catch {
-      setError(true);
+      if (!silent) setError(true);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -85,6 +86,12 @@ export default function MyBookings() {
     loadBookings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFilter, page, searchQuery]);
+
+  // Live push — silently refreshes the current page/filter whenever any of the client's trips
+  // change status, so the status badges here update instantly instead of needing a reload.
+  useTripStatusSocket(() => {
+    loadBookings({ silent: true });
+  });
 
   // Changing filter always jumps back to page 1 — staying on, say, page 3 of "All" when
   // switching to "Cancelled" could land past that filter's own last page.
