@@ -195,6 +195,11 @@ export default function MapView({
   // (e.g. BookTruck's Step 1, when Places search isn't precise enough). Omit to leave the map
   // non-interactive, same as before this existed.
   onMapClick,
+  // Skips the auto-derived pickup/drop markers a resolved route would otherwise add (see
+  // routeMarkers below) — for screens that supply their own explicit, possibly-draggable
+  // pickup/drop markers via `markers` instead (BookTruck's Step 1) and would otherwise end up
+  // with two overlapping pins at the same spot, one draggable and one not.
+  suppressRouteMarkers = false,
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
@@ -226,7 +231,10 @@ export default function MapView({
     [routes, resolvedEndpoints]
   );
 
-  const allMarkers = useMemo(() => [...routeMarkers, ...markers], [routeMarkers, markers]);
+  const allMarkers = useMemo(
+    () => [...(suppressRouteMarkers ? [] : routeMarkers), ...markers],
+    [routeMarkers, markers, suppressRouteMarkers]
+  );
   const pointsKey = allMarkers.map((m) => `${m.position?.lat},${m.position?.lng}`).join("|");
   // Bounds-fitting and the map's center below intentionally use each marker's real (target)
   // position, not the animated one — otherwise the viewport would subtly drift/re-fit on every
@@ -252,6 +260,21 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, isLoaded, pointsKey]);
 
+  // Both hooks below must stay above the loadError/!isLoaded early returns further down — a
+  // hook called only on some renders (e.g. once isLoaded flips true partway through a session)
+  // changes this component's total hook count between renders, which is exactly what threw
+  // "Rendered more hooks than during the previous render" (React error #310) on pages like
+  // TrackShipment.jsx that mount this while the Maps script is still loading.
+  const handleClick = useCallback((e) => {
+    if (!onMapClick) return;
+    onMapClick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+  }, [onMapClick]);
+
+  const mapOptions = useMemo(
+    () => (onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS),
+    [onMapClick]
+  );
+
   if (loadError) {
     return (
       <div className={`flex flex-col items-center justify-center bg-neutral-50 ${className}`} style={{ height }}>
@@ -268,16 +291,6 @@ export default function MapView({
       </div>
     );
   }
-
-  const handleClick = useCallback((e) => {
-    if (!onMapClick) return;
-    onMapClick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-  }, [onMapClick]);
-
-  const mapOptions = useMemo(
-    () => (onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS),
-    [onMapClick]
-  );
 
   return (
     <GoogleMap
@@ -300,6 +313,8 @@ export default function MapView({
           icon={buildMarkerIcon(m, isLoaded, stableHeadings[m.id])}
           title={m.title}
           label={m.label}
+          draggable={!!m.draggable}
+          onDragEnd={m.onDragEnd ? (e) => m.onDragEnd({ lat: e.latLng.lat(), lng: e.latLng.lng() }) : undefined}
         />
       ))}
       {myLocation && (

@@ -346,20 +346,26 @@ export default function BookTruck() {
     if (!form.drop) setPinTarget("drop");
   }, [form.pickup, form.drop]);
 
-  // Reverse-geocodes a tapped map point into whichever field pinTarget currently points at —
-  // same Geocoder call as "Use current location" above, just fed a click instead of GPS.
+  // Shared by every "resolve a raw {lat,lng} into an address" path below — map taps, marker
+  // drags, and the live-location auto-fill — so there's exactly one place that decides how a
+  // point becomes a display address + city, matching what "Use current location" above already did.
+  const reverseGeocode = async (lat, lng) => {
+    const geocoder = new window.google.maps.Geocoder();
+    const { results } = await geocoder.geocode({ location: { lat, lng } });
+    const result = results?.[0];
+    const address = result?.formatted_address?.replace(/,\s*India$/, "") || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const components = result?.address_components || [];
+    const city = components.find((c) => c.types?.includes("locality"))?.long_name
+      || components.find((c) => c.types?.includes("administrative_area_level_2"))?.long_name
+      || null;
+    return { address, city };
+  };
+
+  // Reverse-geocodes a tapped map point into whichever field pinTarget currently points at.
   const handleMapClick = async ({ lat, lng }) => {
     if (!mapsLoaded || !window.google?.maps) return;
     try {
-      const geocoder = new window.google.maps.Geocoder();
-      const { results } = await geocoder.geocode({ location: { lat, lng } });
-      const result = results?.[0];
-      const address = result?.formatted_address?.replace(/,\s*India$/, "") || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      const components = result?.address_components || [];
-      const city = components.find((c) => c.types?.includes("locality"))?.long_name
-        || components.find((c) => c.types?.includes("administrative_area_level_2"))?.long_name
-        || null;
-
+      const { address, city } = await reverseGeocode(lat, lng);
       if (pinTarget === "pickup") {
         updateForm("pickup", address);
         updateForm("pickupLat", lat);
@@ -377,6 +383,52 @@ export default function BookTruck() {
       toast.error("Couldn't resolve an address for that point");
     }
   };
+
+  // Once a pickup/drop pin exists on the Step 1 map, it's draggable — fine-tuning the exact spot
+  // (a specific gate, dock, building entrance) by dragging beats re-searching an address for it.
+  const handlePinDragEnd = async (target, { lat, lng }) => {
+    if (!mapsLoaded || !window.google?.maps) return;
+    try {
+      const { address, city } = await reverseGeocode(lat, lng);
+      if (target === "pickup") {
+        updateForm("pickup", address);
+        updateForm("pickupLat", lat);
+        updateForm("pickupLng", lng);
+        updateForm("pickupCity", city);
+      } else {
+        updateForm("drop", address);
+        updateForm("dropLat", lat);
+        updateForm("dropLng", lng);
+        updateForm("dropCity", city);
+      }
+    } catch {
+      toast.error("Couldn't resolve an address for that point");
+    }
+  };
+
+  // Pickup defaults to the client's own live location the moment it's known — mirrors how most
+  // ride-hailing apps start the pickup pin at "where you are" rather than an empty field, while
+  // still leaving it fully draggable/editable from there. Only fires once (guarded on
+  // form.pickup being empty) — never overrides an address the client already typed, searched,
+  // tapped, or dragged in.
+  useEffect(() => {
+    if (step !== 1 || form.pickup || !myLocation || !mapsLoaded || !window.google?.maps) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { address, city } = await reverseGeocode(myLocation.lat, myLocation.lng);
+        if (cancelled) return;
+        updateForm("pickup", address);
+        updateForm("pickupLat", myLocation.lat);
+        updateForm("pickupLng", myLocation.lng);
+        updateForm("pickupCity", city);
+      } catch {
+        // Silent — the client can still search or tap the map manually.
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, myLocation, mapsLoaded, form.pickup]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -720,7 +772,21 @@ export default function BookTruck() {
     originLabel: form.pickup,
     destinationLabel: form.drop,
   }] : [];
-  const summaryMapMarkers = [
+  // Step 1 always uses explicit, draggable pickup/drop pins instead of the route-inferred ones
+  // other steps fall back to — dragging needs a marker MapView isn't deriving from a Directions
+  // result itself (see suppressRouteMarkers on the MapView call below).
+  const summaryMapMarkers = step === 1 ? [
+    ...(hasPickupCoords ? [{
+      id: "pickup", position: { lat: form.pickupLat, lng: form.pickupLng }, color: "blue",
+      title: form.pickup || "Pickup — drag to adjust", draggable: true,
+      onDragEnd: (pt) => handlePinDragEnd("pickup", pt),
+    }] : []),
+    ...(hasDropCoords ? [{
+      id: "drop", position: { lat: form.dropLat, lng: form.dropLng }, color: "green",
+      title: form.drop || "Drop-off — drag to adjust", draggable: true,
+      onDragEnd: (pt) => handlePinDragEnd("drop", pt),
+    }] : []),
+  ] : [
     ...(hasPickupCoords && !hasDropCoords ? [{ id: "pickup-only", position: { lat: form.pickupLat, lng: form.pickupLng }, color: "blue", title: form.pickup }] : []),
     ...(hasDropCoords && !hasPickupCoords ? [{ id: "drop-only", position: { lat: form.dropLat, lng: form.dropLng }, color: "green", title: form.drop }] : []),
   ];
@@ -742,7 +808,7 @@ export default function BookTruck() {
           markers={summaryMapMarkers}
           height="100%"
           className="absolute inset-0"
-          {...(step === 1 ? { onMapClick: handleMapClick, myLocation } : {})}
+          {...(step === 1 ? { onMapClick: handleMapClick, myLocation, suppressRouteMarkers: true } : {})}
         />
       )}
 
