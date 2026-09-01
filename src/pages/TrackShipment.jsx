@@ -126,6 +126,8 @@ export default function TrackShipment() {
           distanceRemainingKm: data.distanceRemainingKm,
           isTerminal: !!data.isTerminal,
           deliveredAt: data.deliveredAt,
+          pickupOtp: data.pickupOtp,
+          pickupOtpVerified: !!data.pickupOtpVerified,
         });
       } catch {
         if (!cancelled) setIncident(null);
@@ -254,6 +256,25 @@ export default function TrackShipment() {
                     : "We're arranging a solution and will keep you updated."}
                 </p>
               </div>
+            </div>
+          )}
+          {/* Pickup verification code — shown persistently (not behind a reveal/click) from the
+              moment a driver's assigned until they verify it, per the whole point of it: the
+              client should never have to go looking for it, they read it out loud to the
+              driver on arrival. Doesn't expire on its own (see backend's trip.controller.js). */}
+          {tracking?.pickupOtp && !tracking.pickupOtpVerified && (
+            <div className="bg-primary-50 border border-primary/20 rounded-xl p-4 mb-5 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1">Pickup Code</p>
+                <p className="text-sm text-neutral-600">Share this with your driver when they arrive to confirm pickup.</p>
+              </div>
+              <p className="font-poppins font-bold text-3xl text-primary tracking-[0.2em]">{tracking.pickupOtp}</p>
+            </div>
+          )}
+          {tracking?.pickupOtpVerified && (
+            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-5 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+              <p className="text-sm text-neutral-600">Pickup verified with your code.</p>
             </div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 md:gap-6">
