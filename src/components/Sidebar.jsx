@@ -120,10 +120,10 @@ export default function Sidebar({ isOpen, onClose }) {
             )}
           </button>
 
-          {/* Chat is per-booking (no standalone inbox screen) — same as ChatBell used to,
-              this just goes straight to My Bookings instead of opening a preview list. */}
+          {/* Goes to the chat list (see pages/Chats.jsx) — every thread this client's on, not
+              just one booking. */}
           <button
-            onClick={() => { setNotifOpen(false); navigate("/bookings"); onClose?.(); }}
+            onClick={() => { navigate("/chats"); onClose?.(); }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-white/50 hover:bg-white/10 hover:text-white"
           >
             <MessageCircle size={18} strokeWidth={1.8} className="flex-shrink-0" />

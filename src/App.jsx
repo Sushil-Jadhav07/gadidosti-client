@@ -8,6 +8,7 @@ import SessionExpiredModal from "./components/SessionExpiredModal";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import usePushNotifications from "./hooks/usePushNotifications";
+import ChatNotificationListener from "./components/ChatNotificationListener";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Home from "./pages/Home";
@@ -15,6 +16,8 @@ import BookTruck from "./pages/BookTruck";
 import MyBookings from "./pages/MyBookings";
 import BookingDetail from "./pages/BookingDetail";
 import TrackShipment from "./pages/TrackShipment";
+import Chats from "./pages/Chats";
+import ChatDetail from "./pages/ChatDetail";
 import Profile from "./pages/Profile";
 import SavedAddresses from "./pages/SavedAddresses";
 import PaymentMethods from "./pages/PaymentMethods";
@@ -25,6 +28,7 @@ const PAGE_TITLES = {
   "/book": "Book a Truck",
   "/bookings": "My Bookings",
   "/track": "Track Shipment",
+  "/chats": "Chats",
   "/profile": "My Profile",
   "/addresses": "Saved Addresses",
   "/payment-methods": "Payment Methods",
@@ -35,7 +39,9 @@ function WebLayout({ children, hideTopBar }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const title = PAGE_TITLES[location.pathname]
-    || (location.pathname.startsWith("/bookings/") ? "Booking Details" : "Dashboard");
+    || (location.pathname.startsWith("/bookings/") ? "Booking Details"
+      : location.pathname.startsWith("/chats/") ? "Chat"
+      : "Dashboard");
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -165,6 +171,26 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/chats"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <Chats />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/chats/:bookingId"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <ChatDetail />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/profile"
         element={
           <ProtectedRoute>
@@ -215,6 +241,7 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <AppRoutes />
+          <ChatNotificationListener />
           <SessionExpiredModal />
         </ToastProvider>
       </AuthProvider>

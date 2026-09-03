@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, MessageCircle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, MessageCircle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
 import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef, formatBookingStatus, TIMELINE_STEPS } from "../utils";
 import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
@@ -68,6 +70,8 @@ const formatDateTime = (value) => {
 
 export default function TrackShipment() {
   const { user } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
   const [searchId, setSearchId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeBooking, setActiveBooking] = useState(null);
@@ -77,6 +81,10 @@ export default function TrackShipment() {
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [noBookingsYet, setNoBookingsYet] = useState(false);
+  // Shown once the live socket push (below) actually catches a transition into "Delivered" —
+  // not just because the booking happens to already be delivered on load, which would nudge for
+  // a rating every time this page is revisited for an old delivered shipment.
+  const [showRateNudge, setShowRateNudge] = useState(false);
   const token = getToken();
 
   useEffect(() => {
@@ -149,9 +157,25 @@ export default function TrackShipment() {
   // with the new status. No reload needed.
   useTripStatusSocket((trip) => {
     if (!trip?.bookingId || trip.bookingId !== activeBooking?.id) return;
-    setActiveBooking((current) => (current ? { ...current, status: formatBookingStatus(trip.status) } : current));
+    const newStatus = formatBookingStatus(trip.status);
+    setActiveBooking((current) => {
+      if (!current) return current;
+      // Compared against the value already in state (not a separate ref) so this only ever
+      // fires on the actual transition — the functional updater sees the pre-update status.
+      if (current.status !== "Delivered" && newStatus === "Delivered") {
+        toast.success("Delivery complete! Please rate your trip.");
+        setShowRateNudge(true);
+      }
+      return { ...current, status: newStatus };
+    });
     setRefreshTick((n) => n + 1);
   });
+
+  // A fresh booking (new search, or the initial load) starts this nudge hidden again — it's
+  // only ever meant to react to a live transition caught above, not linger from a previous one.
+  useEffect(() => {
+    setShowRateNudge(false);
+  }, [activeBooking?.id]);
 
   // Primary path for the live truck marker while a trip is actually en route — updates
   // lat/lng/heading the instant a location ping lands, instead of waiting out the rest of the
@@ -251,6 +275,22 @@ export default function TrackShipment() {
         </div>
       ) : activeBooking ? (
         <>
+          {showRateNudge && (
+            <div className="bg-primary-50 border border-primary/20 rounded-xl p-4 mb-5 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-card">
+                  <Star className="w-4 h-4 text-warning" />
+                </div>
+                <p className="text-sm text-neutral-700">Your shipment was delivered — let us know how it went.</p>
+              </div>
+              <button
+                onClick={() => navigate(`/bookings/${activeBooking.id}`)}
+                className="text-xs font-semibold text-primary hover:underline flex-shrink-0"
+              >
+                Rate this trip →
+              </button>
+            </div>
+          )}
           {incident && (
             <div className="bg-orange-50 border border-yellow-200 rounded-xl p-4 mb-5 flex items-start gap-3">
               <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-card">

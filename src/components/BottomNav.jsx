@@ -1,12 +1,13 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, User } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User } from "lucide-react";
 
 const NAV_ITEMS = [
   { path: "/", label: "Home", Icon: Home },
   { path: "/book", label: "Book", Icon: PlusCircle },
   { path: "/bookings", label: "Bookings", Icon: ClipboardList },
   { path: "/track", label: "Track", Icon: MapPin },
+  { path: "/chats", label: "Chats", Icon: MessageCircle },
   { path: "/profile", label: "Profile", Icon: User },
 ];
 
@@ -24,7 +25,7 @@ export default function BottomNav() {
             <button
               key={path}
               onClick={() => navigate(path)}
-              className={`flex flex-col items-center justify-center gap-0.5 w-16 h-full relative transition-colors duration-200 ${
+              className={`flex flex-col items-center justify-center gap-0.5 flex-1 min-w-0 h-full relative transition-colors duration-200 ${
                 isActive ? "text-primary" : "text-neutral-300"
               }`}
             >
