@@ -77,7 +77,7 @@ export default function SessionExpiredModal() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Email Address</label>
-          <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-3.5 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+          <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-3.5 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
             <Mail className="w-4.5 h-4.5 text-neutral-300 mr-2 flex-shrink-0" />
             <input
               ref={emailInputRef}
@@ -93,7 +93,7 @@ export default function SessionExpiredModal() {
 
         <div>
           <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Password</label>
-          <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-3.5 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+          <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-3.5 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
             <Lock className="w-4.5 h-4.5 text-neutral-300 mr-2 flex-shrink-0" />
             <input
               type={showPassword ? "text" : "password"}

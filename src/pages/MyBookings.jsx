@@ -172,7 +172,7 @@ export default function MyBookings() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Filter by ID or route..."
-            className="w-full bg-white border border-neutral-200 rounded-full pl-9 pr-4 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all"
+            className="w-full bg-white border border-neutral-200 rounded-full pl-9 pr-4 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all"
           />
         </div>
       </div>

@@ -179,7 +179,7 @@ export default function Profile() {
             {/* Glow */}
             <div
               className="absolute top-0 right-0 w-48 h-48 pointer-events-none opacity-15"
-              style={{ background: "radial-gradient(circle, rgba(25,118,255,0.5) 0%, transparent 70%)" }}
+              style={{ background: "radial-gradient(circle, rgba(22,101,52,0.5) 0%, transparent 70%)" }}
             />
 
             <div className="relative z-10 p-6 text-center">

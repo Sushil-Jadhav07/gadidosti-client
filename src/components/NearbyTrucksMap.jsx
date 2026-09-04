@@ -247,6 +247,11 @@ export default function NearbyTrucksMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(stops)]
   );
+  // Kept blue (not swept up in the primary-color-to-green change elsewhere) — it's paired
+  // against dropIcon's green right next to it on the same map, and Google's own pickup/drop
+  // pin convention throughout the rest of the app (BookTruck's summary map, TrackShipment,
+  // SavedAddresses) is blue-pickup/green-drop for the same reason: two different greens here
+  // would be far harder to tell apart at a glance than blue vs. green is.
   const pickupIcon = useMemo(() => (isLoaded ? buildPinIcon("#1976FF") : undefined), [isLoaded]);
   const dropIcon = useMemo(() => (isLoaded ? buildPinIcon("#17D86B") : undefined), [isLoaded]);
   const circleOptions = useMemo(() => ({

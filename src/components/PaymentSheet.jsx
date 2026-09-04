@@ -105,7 +105,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
         {stage === "methods" && (
           <div
             className="hidden md:flex w-64 flex-shrink-0 flex-col text-white p-5"
-            style={{ background: "linear-gradient(160deg, #1976FF 0%, #0D3B85 100%)" }}
+            style={{ background: "linear-gradient(160deg, #166534 0%, #14532D 100%)" }}
           >
             <div className="flex items-center gap-2.5 mb-6">
               <img src="/gadidost-logo.png" alt="GadiDost" className="w-8 h-8 rounded-lg bg-white/90 p-1 flex-shrink-0" />
@@ -322,7 +322,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
             <div className="flex-1 flex flex-col">
               <div
                 className="mx-5 mt-4 rounded-xl px-4 py-3 flex items-center justify-between text-white flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #1565C0 0%, #1976FF 100%)" }}
+                style={{ background: "linear-gradient(135deg, #14532D 0%, #166534 100%)" }}
               >
                 <span className="text-sm font-medium tracking-wide">{upiId || "UPI App"}</span>
                 <span className="font-poppins font-bold">{amountLabel}</span>

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, MessageCircle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
+import TripChatFab from "../components/TripChatFab";
 import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -243,7 +244,7 @@ export default function TrackShipment() {
     <div className="p-4 md:p-8 animate-page-enter">
       {/* Search Bar */}
       <div className="flex gap-3 mb-6 md:mb-8 w-full max-w-xl">
-        <div className="flex-1 flex items-center bg-white border border-neutral-200 rounded-lg px-4 py-3 shadow-card focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(25,118,255,0.1)] transition-all">
+        <div className="flex-1 flex items-center bg-white border border-neutral-200 rounded-lg px-4 py-3 shadow-card focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all">
           <Search className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
           <input
             type="text"
@@ -336,16 +337,7 @@ export default function TrackShipment() {
                   long real addresses (not short city names) never squeeze this row unevenly. */}
               <div className="flex items-center justify-between gap-2 mb-4">
                 <p className="text-xs text-neutral-400 font-medium">{bookingRef(activeBooking)}</p>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => setShowChat(true)}
-                    className="w-8 h-8 rounded-lg bg-primary-50 text-primary flex items-center justify-center hover:bg-primary/15 transition-colors"
-                    title="Chat"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                  </button>
-                  <StatusBadge status={activeBooking.status} />
-                </div>
+                <StatusBadge status={activeBooking.status} />
               </div>
 
               {/* Route rail — pickup, any extra loading/unloading stops, then drop, each on its
@@ -616,6 +608,8 @@ export default function TrackShipment() {
           </p>
         </div>
       )}
+
+      {activeBooking && <TripChatFab bookingId={activeBooking.id} onClick={() => setShowChat(true)} />}
 
       <BottomSheet isOpen={showChat} onClose={() => setShowChat(false)}>
         {activeBooking && (

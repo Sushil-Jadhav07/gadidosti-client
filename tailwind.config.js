@@ -6,11 +6,11 @@ module.exports = {
     extend: {
       colors: {
         primary: {
-          DEFAULT: "#1976FF",
-          dark: "#1565C0",
-          light: "#42A5F5",
-          50: "#E3F2FD",
-          100: "#BBDEFB",
+          DEFAULT: "#166534",
+          dark: "#14532D",
+          light: "#16A34A",
+          50: "#F0FDF4",
+          100: "#DCFCE7",
         },
         secondary: {
           DEFAULT: "#041E42",
@@ -38,7 +38,7 @@ module.exports = {
         success: "#17D86B",
         warning: "#F59E0B",
         danger: "#EF4444",
-        info: "#1976FF",
+        info: "#166534",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -61,7 +61,7 @@ module.exports = {
         "card-hover": "0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.04)",
         dropdown: "0 10px 40px rgba(0,0,0,0.12)",
         nav: "0 -2px 10px rgba(0,0,0,0.06)",
-        "glow-blue": "0 0 20px rgba(25,118,255,0.2)",
+        "glow-blue": "0 0 20px rgba(22,101,52,0.2)",
         "glow-green": "0 0 20px rgba(23,216,107,0.2)",
         device: "0 0 30px rgba(0,0,0,0.08)",
       },
@@ -116,6 +116,10 @@ module.exports = {
           "0%, 100%": { boxShadow: "0 0 0 0 rgba(23,216,107,0.4)" },
           "50%": { boxShadow: "0 0 0 8px rgba(23,216,107,0)" },
         },
+        "typing-dot": {
+          "0%, 60%, 100%": { transform: "translateY(0)", opacity: "0.4" },
+          "30%": { transform: "translateY(-4px)", opacity: "1" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s infinite linear",
@@ -130,6 +134,7 @@ module.exports = {
         "slide-up": "slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
         "fade-in": "fade-in 200ms ease-out forwards",
         "green-pulse": "green-pulse 2s infinite",
+        "typing-dot": "typing-dot 1.2s ease-in-out infinite",
       },
     },
   },

@@ -166,10 +166,15 @@ export default function Login() {
   return (
     <div className="min-h-screen flex">
       {/* Left — Branding Panel */}
-      <div className="hidden lg:flex flex-col w-[55%] bg-secondary relative overflow-hidden">
+      <div
+        className="hidden lg:flex flex-col w-[55%] relative overflow-hidden"
+        style={{ background: "linear-gradient(160deg, #14532D 0%, #166534 55%, #16A34A 100%)" }}
+      >
+        {/* Light highlight, not green-on-green — a colored glow would barely show against a
+            background that's already this same green. */}
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: "radial-gradient(ellipse at 30% 40%, rgba(25,118,255,0.25) 0%, transparent 60%)" }}
+          style={{ background: "radial-gradient(ellipse at 75% 15%, rgba(255,255,255,0.16) 0%, transparent 55%)" }}
         />
         <div className="absolute inset-0 opacity-5">
           <svg width="100%" height="100%">
@@ -190,11 +195,11 @@ export default function Login() {
             <div className="bg-white rounded-lg px-3 py-2 inline-block">
               <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
             </div>
-            <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Portal</p>
+            <p className="text-xs font-semibold text-white/70 uppercase tracking-widest">Client Portal</p>
           </div>
 
           <div className="flex-1 flex flex-col justify-center">
-            <p className="text-primary text-sm font-semibold tracking-wide uppercase mb-3">
+            <p className="text-white/70 text-sm font-semibold tracking-wide uppercase mb-3">
               India's Trusted Transport Platform
             </p>
             <h2 className="font-poppins font-bold text-4xl text-white leading-tight mb-4">
@@ -202,7 +207,7 @@ export default function Login() {
               Across India,<br />
               Seamlessly.
             </h2>
-            <p className="text-white/60 text-base leading-relaxed max-w-sm">
+            <p className="text-white/70 text-base leading-relaxed max-w-sm">
               Connect with verified truck drivers and logistics partners for
               fast, reliable, and affordable shipments.
             </p>
@@ -211,11 +216,11 @@ export default function Login() {
               {FEATURES.map(({ icon: Icon, label, desc }) => (
                 <div key={label} className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Icon className="w-4 h-4 text-primary" />
+                    <Icon className="w-4 h-4 text-white" />
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-white">{label}</p>
-                    <p className="text-xs text-white/50 mt-0.5">{desc}</p>
+                    <p className="text-xs text-white/60 mt-0.5">{desc}</p>
                   </div>
                 </div>
               ))}
@@ -227,23 +232,23 @@ export default function Login() {
       </div>
 
       {/* Right — Login Form */}
-      <div className="flex-1 flex items-center justify-center bg-neutral px-6 py-10">
+      <div className="flex-1 flex items-center justify-center overflow-x-hidden bg-neutral px-6 py-6">
         <div className="w-full max-w-sm">
-          <div className="flex flex-col items-center gap-2 mb-8 lg:hidden">
-            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-12 w-auto" />
+          <div className="flex flex-col items-center gap-1.5 mb-5 lg:hidden">
+            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
             <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Portal</p>
           </div>
 
           <div className={shake ? "animate-shake" : ""}>
-            <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1 text-center">Welcome back</h2>
-            <p className="text-sm text-neutral-400 mb-8 text-center">Sign in to manage your shipments</p>
+            <h2 className="font-poppins font-bold text-2xl text-neutral-800 mb-1 text-center">Welcome back</h2>
+            <p className="text-sm text-neutral-400 mb-5 text-center">Sign in to manage your shipments</p>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
                   Email Address
                 </label>
-                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
                   <Mail className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
                   <input
                     ref={emailInputRef}
@@ -266,7 +271,7 @@ export default function Login() {
                     Forgot password?
                   </button>
                 </div>
-                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
                   <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
                   <input
                     type={showPassword ? "text" : "password"}
@@ -296,7 +301,7 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-4 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
                 {loading ? (
                   <>
@@ -314,7 +319,7 @@ export default function Login() {
 
             {showGoogleBtn && (
               <>
-                <div className="relative my-5">
+                <div className="relative my-4">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-neutral-200" />
                   </div>
@@ -334,21 +339,21 @@ export default function Login() {
               </>
             )}
 
-            <div className="mt-6 p-4 bg-primary-50 rounded-xl text-center">
+            <div className="mt-4 p-3.5 bg-primary-50 rounded-xl text-center">
               <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">Demo Credentials</p>
               <p className="text-xs font-mono text-primary">
                 client@gmail.com <span className="text-neutral-300 mx-1.5">|</span> client@123
               </p>
             </div>
 
-            <p className="text-sm text-neutral-500 text-center mt-5">
+            <p className="text-sm text-neutral-500 text-center mt-4">
               New here?{" "}
               <Link to="/register" className="text-primary font-semibold hover:underline">
                 Create an account
               </Link>
             </p>
 
-            <p className="text-[11px] text-neutral-400 mt-4 text-center">
+            <p className="text-[11px] text-neutral-400 mt-3 text-center">
               By signing in, you agree to our{" "}
               <button className="text-primary hover:underline">Terms &amp; Privacy Policy</button>
             </p>

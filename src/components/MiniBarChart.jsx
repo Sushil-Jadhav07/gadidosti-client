@@ -2,7 +2,7 @@ import { BarChart3 } from "lucide-react";
 
 // Dependency-free companion to MiniAreaChart — see that file's comment for why this isn't
 // built on a charting library.
-export default function MiniBarChart({ data, height = 180, color = "#1976FF", emptyLabel = "No data yet" }) {
+export default function MiniBarChart({ data, height = 180, color = "#166534", emptyLabel = "No data yet" }) {
   const max = Math.max(...data.map((d) => d.value), 1);
   const allZero = data.length > 0 && data.every((d) => !d.value);
 

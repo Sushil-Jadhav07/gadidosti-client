@@ -5,7 +5,7 @@ import { LineChart } from "lucide-react";
 // pulling one in for two small dashboard charts (see also MiniBarChart) wasn't worth the extra
 // bundle weight. Plain SVG, same visual language (brand blue, rounded stroke) as the rest of
 // the app rather than a generic chart-library look.
-export default function MiniAreaChart({ data, height = 180, color = "#1976FF", valuePrefix = "", emptyLabel = "No data yet" }) {
+export default function MiniAreaChart({ data, height = 180, color = "#166534", valuePrefix = "", emptyLabel = "No data yet" }) {
   const width = 600;
   const padding = 20;
 

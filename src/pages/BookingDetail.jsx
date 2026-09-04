@@ -7,6 +7,8 @@ import {
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
 import MapView from "../components/MapView";
+import ChatWindow from "../components/ChatWindow";
+import TripChatFab from "../components/TripChatFab";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
@@ -38,6 +40,7 @@ export default function BookingDetail() {
   const [error, setError] = useState(false);
 
   const [showPaymentSheet, setShowPaymentSheet] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [showRateSheet, setShowRateSheet] = useState(false);
   const [showDisputeSheet, setShowDisputeSheet] = useState(false);
   const [showEmailSheet, setShowEmailSheet] = useState(false);
@@ -235,7 +238,7 @@ export default function BookingDetail() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Booking Details</h1>
           <button onClick={copyId} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-600 transition-colors">
             {bookingRef(booking)} <Copy className="w-3 h-3" />
@@ -603,6 +606,13 @@ export default function BookingDetail() {
         onPayLater={() => { setShowPaymentSheet(false); toast.info("You can pay anytime from this page."); }}
         allowPayLater={booking.paymentStatus !== "Partial" && Number(booking.amount) <= ADVANCE_PAYMENT_THRESHOLD}
       />
+
+      <TripChatFab bookingId={booking.id} onClick={() => setShowChat(true)} />
+
+      <BottomSheet isOpen={showChat} onClose={() => setShowChat(false)}>
+        <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-3">Chat &mdash; {bookingRef(booking)}</h3>
+        <ChatWindow bookingId={booking.id} currentUserId={user?.id} />
+      </BottomSheet>
 
       <BottomSheet isOpen={showRateSheet} onClose={() => setShowRateSheet(false)}>
         <RateDeliverySheet booking={booking} onSubmit={handleRateSubmit} onCancel={() => setShowRateSheet(false)} />

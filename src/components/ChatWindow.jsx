@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
-import { Send, MessageCircle, Bot } from "lucide-react";
+import { Send, MessageCircle, Bot, CheckCheck } from "lucide-react";
 import { api, getToken } from "../services/api";
 import { useToast } from "../context/ToastContext";
+import TypingDots from "./TypingDots";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const BOT_NAME = "Gadidosti Assistant";
+// Floor on how long the bot's "typing" bubble stays up after a quick-reply tap or an
+// auto-escalating free-text send, so the reply never feels like it snapped back instantly even
+// when the API responds in a few ms — the request itself is never slowed down, only the reveal.
+const BOT_THINK_MS = 750;
 
 // Sender roles that mean a real person (not the bot) is now on the thread — used to flip a
 // bot-stage thread to 'human' locally the instant one of their messages lands, so quick-reply
@@ -17,7 +23,7 @@ const HUMAN_AGENT_ROLES = ["broker", "driver", "admin"];
 // socket connection (auth'd with the same access token as every REST call) delivers new
 // messages/typing/read-receipts in real time on top of it. Works for client, broker, and
 // driver — whoever the booking's participants are; admin gets a read-only view via `readOnly`.
-export default function ChatWindow({ bookingId, currentUserId, readOnly = false }) {
+export default function ChatWindow({ bookingId, currentUserId, readOnly = false, className }) {
   const toast = useToast();
   // Holds the full thread record from GET .../thread, including stage/isLocked — kept in state
   // (rather than re-derived) so the bot-escalation/lock signals below can patch it in place.
@@ -29,9 +35,27 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
   const [sending, setSending] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
+  const [botThinking, setBotThinking] = useState(false);
   const socketRef = useRef(null);
   const bottomRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  // Mirrors botThinking for the socket handler below, which closes over state from the effect's
+  // first run — a plain state read there would always see the initial `false`.
+  const botThinkingRef = useRef(false);
+  // Bot replies that land on the socket while the thinking bubble is still up get held here and
+  // flushed together once the minimum delay clears, instead of popping in ahead of the dots.
+  const pendingBotMessagesRef = useRef([]);
+
+  const flushPendingBotMessages = () => {
+    if (pendingBotMessagesRef.current.length === 0) return;
+    const toAdd = pendingBotMessagesRef.current;
+    pendingBotMessagesRef.current = [];
+    setMessages((current) => {
+      const ids = new Set(current.map((m) => m.id));
+      const fresh = toAdd.filter((m) => !ids.has(m.id));
+      return fresh.length ? [...current, ...fresh] : current;
+    });
+  };
 
   useEffect(() => {
     if (!bookingId) return;
@@ -60,6 +84,10 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
 
         socket.on("new-message", (msg) => {
           if (msg.threadId !== t.id) return;
+          if (msg.senderRole === "bot" && botThinkingRef.current) {
+            pendingBotMessagesRef.current.push(msg);
+            return;
+          }
           setMessages((current) => (current.some((m) => m.id === msg.id) ? current : [...current, msg]));
           if (HUMAN_AGENT_ROLES.includes(msg.senderRole)) {
             setThread((current) => (current && current.stage === "bot" ? { ...current, stage: "human" } : current));
@@ -102,16 +130,34 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
     const text = input.trim();
     if (!text || !thread || !socketRef.current) return;
     setSending(true);
-    socketRef.current.emit("send-message", { threadId: thread.id, message: text }, (ack) => {
+    // Free text sent while still 'bot' stage auto-escalates server-side and comes back with a
+    // bot "connecting you" message — only then is there a bot reply worth covering with the
+    // thinking bubble; a normal human-stage send should land the instant the ack does.
+    const expectingBotReply = thread.stage === "bot" && !thread.isLocked;
+    if (expectingBotReply) {
+      setBotThinking(true);
+      botThinkingRef.current = true;
+    }
+
+    const ackPromise = new Promise((resolve) => {
+      socketRef.current.emit("send-message", { threadId: thread.id, message: text }, resolve);
+    });
+    const settle = expectingBotReply
+      ? Promise.all([ackPromise, new Promise((r) => setTimeout(r, BOT_THINK_MS))]).then(([ack]) => ack)
+      : ackPromise;
+
+    settle.then((ack) => {
       setSending(false);
       if (ack?.success) {
         setInput("");
-        // Free text sent while still 'bot' stage auto-escalates server-side; the ack carries the
-        // bot's own "connecting you" message when that happened, so react to it right away
-        // instead of waiting for that message to arrive over the socket.
         if (ack.botMessage) setThread((current) => (current ? { ...current, stage: "human" } : current));
       } else if (ack?.message) {
         toast.error(ack.message);
+      }
+      if (expectingBotReply) {
+        setBotThinking(false);
+        botThinkingRef.current = false;
+        flushPendingBotMessages();
       }
     });
   };
@@ -124,8 +170,13 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
   const handleBotAction = async (actionId) => {
     if (actionLoading || !thread) return;
     setActionLoading(true);
+    setBotThinking(true);
+    botThinkingRef.current = true;
     try {
-      const res = await api.post(`/api/chat/threads/${thread.id}/bot-action`, { actionId }, getToken());
+      const [res] = await Promise.all([
+        api.post(`/api/chat/threads/${thread.id}/bot-action`, { actionId }, getToken()),
+        new Promise((r) => setTimeout(r, BOT_THINK_MS)),
+      ]);
       if (!res?.success) {
         setThread((current) => (current ? { ...current, stage: "human" } : current));
         if (res?.message) toast.error(res.message);
@@ -138,6 +189,9 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
       toast.error(err?.message || "Failed to send. Please try again.");
     } finally {
       setActionLoading(false);
+      setBotThinking(false);
+      botThinkingRef.current = false;
+      flushPendingBotMessages();
     }
   };
 
@@ -159,7 +213,7 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
     : [];
 
   return (
-    <div className="flex flex-col h-[60vh] md:h-[500px]">
+    <div className={className || "flex flex-col h-[60vh] md:h-[500px]"}>
       <div className="flex-1 overflow-y-auto space-y-2.5 p-1">
         {loading ? (
           <div className="h-full flex items-center justify-center">
@@ -193,20 +247,23 @@ export default function ChatWindow({ bookingId, currentUserId, readOnly = false 
                   {!isMine && (
                     <p className={`text-[10px] font-semibold mb-0.5 flex items-center gap-1 ${isBot ? "text-indigo-600" : "opacity-70"}`}>
                       {isBot && <Bot className="w-3 h-3" />}
-                      {isBot ? "SSK Assistant" : m.senderName}
+                      {isBot ? BOT_NAME : m.senderName}
                     </p>
                   )}
                   <p className="whitespace-pre-wrap break-words">{m.message}</p>
-                  <p className={`text-[10px] mt-0.5 text-right ${isMine ? "text-white/70" : "text-neutral-400"}`}>
+                  <p className={`text-[10px] mt-0.5 flex items-center justify-end gap-1 ${isMine ? "text-white/70" : "text-neutral-400"}`}>
                     {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {isMine && m.readAt ? " · Read" : ""}
+                    {isMine && (
+                      <CheckCheck className={`w-3.5 h-3.5 flex-shrink-0 ${m.readAt ? "text-primary-light" : "text-white/50"}`} />
+                    )}
                   </p>
                 </div>
               </div>
             );
           })
         )}
-        {someoneTyping && <p className="text-xs text-neutral-400 italic pl-1">Typing...</p>}
+        {botThinking && <TypingDots isBot label={BOT_NAME} />}
+        {someoneTyping && !botThinking && <TypingDots />}
         <div ref={bottomRef} />
       </div>
 

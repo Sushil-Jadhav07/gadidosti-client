@@ -132,10 +132,15 @@ export default function Register() {
   return (
     <div className="min-h-screen flex">
       {/* Left Panel */}
-      <div className="hidden lg:flex flex-col lg:w-1/2 bg-secondary relative overflow-hidden">
+      <div
+        className="hidden lg:flex flex-col lg:w-1/2 relative overflow-hidden"
+        style={{ background: "linear-gradient(160deg, #14532D 0%, #166534 55%, #16A34A 100%)" }}
+      >
+        {/* Light highlight, not green-on-green — a colored glow would barely show against a
+            background that's already this same green. */}
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: "radial-gradient(ellipse at 30% 40%, rgba(25,118,255,0.25) 0%, transparent 60%)" }}
+          style={{ background: "radial-gradient(ellipse at 75% 15%, rgba(255,255,255,0.16) 0%, transparent 55%)" }}
         />
         <div className="relative z-10 flex flex-col h-full px-12 py-10">
           {/* The wordmark's own text is dark, unreadable straight on this dark panel (only the
@@ -145,13 +150,13 @@ export default function Register() {
             <div className="bg-white rounded-lg px-3 py-2 inline-block">
               <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
             </div>
-            <p className="text-xs font-semibold text-primary/80 uppercase tracking-widest">Client Portal</p>
+            <p className="text-xs font-semibold text-white/70 uppercase tracking-widest">Client Portal</p>
           </div>
           <div className="flex-1 flex flex-col justify-center">
             <h2 className="font-poppins font-bold text-4xl text-white leading-tight mb-4">
               Join India's<br />Leading<br />Logistics Network
             </h2>
-            <p className="text-white/60 text-base leading-relaxed max-w-sm">
+            <p className="text-white/70 text-base leading-relaxed max-w-sm">
               Register in seconds and start booking verified trucks across India.
             </p>
           </div>
@@ -160,15 +165,15 @@ export default function Register() {
       </div>
 
       {/* Right — Form */}
-      <div className="w-[55%] lg:w-1/2 flex items-center justify-start bg-neutral px-6 py-10">
-        <div className="w-full ">
-          <div className="flex flex-col items-center gap-2 mb-8 lg:hidden">
-            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-12 w-auto" />
+      <div className="w-full lg:w-1/2 flex items-center justify-center overflow-x-hidden bg-neutral px-6 py-6">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center gap-1.5 mb-5 lg:hidden">
+            <img src="/gadidost-logo.png" alt="GadiDost Logo" className="h-10 w-auto" />
             <p className="text-xs font-semibold text-primary/70 uppercase tracking-widest">Client Portal</p>
           </div>
 
-          <h2 className="font-poppins font-bold text-3xl text-neutral-800 mb-1">Create an account</h2>
-          <p className="text-sm text-neutral-400 mb-8">Enter your details below to get started.</p>
+          <h2 className="font-poppins font-bold text-2xl text-neutral-800 mb-1">Create an account</h2>
+          <p className="text-sm text-neutral-400 mb-5">Enter your details below to get started.</p>
 
           {showGoogleBtn && (
             <>
@@ -180,7 +185,7 @@ export default function Register() {
                 </p>
               )}
 
-              <div className="relative my-6">
+              <div className="relative my-4">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-neutral-200" />
                 </div>
@@ -191,39 +196,35 @@ export default function Register() {
             </>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Full Name */}
-            <div className="w-full grid grid-cols-2 gap-4"> 
-            <div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
                 <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
-                Full Name
-              </label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={set("name")}
-                placeholder="John Doe"
-                required
-                autoFocus
-                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
-              />
-            </div>
-            <div> <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
-                Email Address <span className="text-danger">*</span>
-              </label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={set("email")}
-                placeholder="john@company.com"
-                required
-                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
-              /></div>
-            </div>
-
-            {/* Email */}
-            <div>
-             
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={set("name")}
+                  placeholder="John Doe"
+                  required
+                  autoFocus
+                  className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
+                  Email Address <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={set("email")}
+                  placeholder="john@company.com"
+                  required
+                  className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all"
+                />
+              </div>
             </div>
 
             {/* Phone (optional) */}
@@ -237,17 +238,17 @@ export default function Register() {
                 onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
                 placeholder="+91 00000 00000"
                 inputMode="numeric"
-                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3.5 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all"
+                className="w-full bg-white border border-neutral-200 rounded-xl px-4 py-3 text-sm text-neutral-800 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all"
               />
             </div>
 
             {/* Password + Confirm — side by side */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
                   Password
                 </label>
-                <div className="flex items-center bg-white border border-neutral-200 rounded-xl px-3 py-3.5 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all">
+                <div className="flex items-center bg-white border border-neutral-200 rounded-xl px-3 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
                   <input
                     type={showPassword ? "text" : "password"}
                     value={form.password}
@@ -267,7 +268,7 @@ export default function Register() {
                 <label className="block text-sm font-semibold text-neutral-800 mb-1.5">
                   Confirm Password
                 </label>
-                <div className={`flex items-center bg-white border rounded-xl px-3 py-3.5 focus-within:shadow-[0_0_0_4px_rgba(25,118,255,0.1)] transition-all ${!passwordsMatch ? "border-red-200 focus-within:border-red-400" : "border-neutral-200 focus-within:border-primary"}`}>
+                <div className={`flex items-center bg-white border rounded-xl px-3 py-3 focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all ${!passwordsMatch ? "border-red-200 focus-within:border-red-400" : "border-neutral-200 focus-within:border-primary"}`}>
                   <input
                     type={showConfirm ? "text" : "password"}
                     value={form.confirm}
@@ -281,7 +282,7 @@ export default function Register() {
                   </button>
                 </div>
               </div>
-              {!passwordsMatch && <p className="col-span-2 text-xs text-red-500 -mt-2">Passwords do not match</p>}
+              {!passwordsMatch && <p className="col-span-1 sm:col-span-2 text-xs text-red-500 -mt-2">Passwords do not match</p>}
             </div>
 
             {error && (
@@ -300,7 +301,7 @@ export default function Register() {
             <button
               type="submit"
               disabled={loading || !canSubmit}
-              className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-4 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+              className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
             >
               {loading ? (
                 <>
@@ -315,7 +316,7 @@ export default function Register() {
             </button>
           </form>
 
-          <p className="text-sm text-neutral-500 text-center mt-6">
+          <p className="text-sm text-neutral-500 text-center mt-4">
             Already have an account?{" "}
             <Link to="/login" className="text-primary font-semibold hover:underline">
               Sign In

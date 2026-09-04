@@ -117,8 +117,8 @@ const MY_LOCATION_ICON = (isLoaded) => {
   return {
     url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r="9" fill="#1976FF" fill-opacity="0.18"/>
-        <circle cx="11" cy="11" r="6" fill="#1976FF" stroke="white" stroke-width="2.5"/>
+        <circle cx="11" cy="11" r="9" fill="#166534" fill-opacity="0.18"/>
+        <circle cx="11" cy="11" r="6" fill="#166534" stroke="white" stroke-width="2.5"/>
       </svg>`
     ),
     scaledSize: new window.google.maps.Size(22, 22),
@@ -173,7 +173,7 @@ function RouteRenderer({ route, onResolved }) {
           options={{
             suppressMarkers: true,
             preserveViewport: true,
-            polylineOptions: { strokeColor: route.color || "#1976FF", strokeWeight: 4, strokeOpacity: 0.85 },
+            polylineOptions: { strokeColor: route.color || "#166534", strokeWeight: 4, strokeOpacity: 0.85 },
           }}
         />
       )}

@@ -206,7 +206,10 @@ export default function SavedAddresses() {
         </div>
         <button
           onClick={openAdd}
-          className="flex items-center gap-2 px-4 py-2.5 bg-secondary text-white text-sm font-semibold rounded-lg hover:bg-secondary-light transition-colors flex-shrink-0"
+          className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-white hover:text-primary 
+          border border-primary hover:border-primary
+          hover:ring-1 hover:ring-primary
+          transition-colors flex-shrink-0"
         >
           <MapPin className="w-4 h-4" /> Add New Address
         </button>

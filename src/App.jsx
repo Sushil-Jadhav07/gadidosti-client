@@ -7,8 +7,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import SessionExpiredModal from "./components/SessionExpiredModal";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
+import { ChatUnreadProvider } from "./context/ChatUnreadContext";
 import usePushNotifications from "./hooks/usePushNotifications";
 import ChatNotificationListener from "./components/ChatNotificationListener";
+import ChatLauncher from "./components/ChatLauncher";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Home from "./pages/Home";
@@ -239,11 +241,14 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <ToastProvider>
-          <AppRoutes />
-          <ChatNotificationListener />
-          <SessionExpiredModal />
-        </ToastProvider>
+        <ChatUnreadProvider>
+          <ToastProvider>
+            <AppRoutes />
+            <ChatNotificationListener />
+            <ChatLauncher />
+            <SessionExpiredModal />
+          </ToastProvider>
+        </ChatUnreadProvider>
       </AuthProvider>
     </ErrorBoundary>
   );
