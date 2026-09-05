@@ -3,15 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#041E42" />
+    <meta name="theme-color" content="#166534" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>SSK Logistics - GadiDost</title>
+    <title>GadiDost — Logistics Management</title>
+    <Link rel="icon" href="/favicongd.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap" rel="stylesheet" />
+    <style>
+      /* Same boot splash as gadidosti-broker-driver's index.html — shown until main.jsx removes
+         it on first paint, so there's no blank white flash while the JS bundle loads. */
+      #splash {
+        position: fixed; inset: 0;
+        background: linear-gradient(160deg, #14532D 0%, #166534 55%, #16A34A 100%);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.5s ease, visibility 0.5s ease;
+        flex-direction: column; gap: 24px;
+      }
+      #splash.fade-out { opacity: 0; visibility: hidden; }
+      #splash-logo { height: 48px; filter: brightness(0) invert(1); animation: pulse-logo 1.5s ease-in-out infinite; }
+      /* loaderGif.gif is a wide 2304x720 banner, not a square icon — sized by height with
+         width auto so it keeps its real aspect ratio instead of being cropped into a circle. */
+      #splash-spinner { height: min(600px, 65vh); width: auto; max-width: 92vw; }
+      @keyframes pulse-logo { 0%,100%{opacity:1} 50%{opacity:0.6} }
+    </style>
   </head>
   <body>
+    <div id="splash">
+      <img id="splash-logo" src="/gadidost-logo.png" alt="GadiDost" />
+      <img id="splash-spinner" src="/loaderGif.gif" alt="Loading" />
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
