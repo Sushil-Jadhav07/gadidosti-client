@@ -2,17 +2,14 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, Check, Sparkles, Smartphone, CreditCard, Landmark, Wallet, Clock, Phone,
-  Delete, Eye, EyeOff, ShieldCheck,
+  Delete, Eye, EyeOff, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import {
   GooglePayImageLogo, PhonePeLogo, PaytmImageLogo, VisaLogo, MastercardLogo,
   AmazonPayImageLogo, MobikwikLogo, FreechargeLogo, BankLogo, PayPalImageLogo,
 } from "./PaymentLogos";
+import { api } from "../services/api";
 
-// Simulated checkout — there's no real payment gateway wired up yet, so this mimics a
-// Razorpay-style payment sheet (category list -> method detail -> PIN/processing -> success)
-// purely for UX/demo purposes. It never talks to a bank or card network; the parent creates
-// the booking with payment_status "paid" once onSuccess fires, or "pending" via onPayLater.
 const BASE_CATEGORIES = [
   { id: "recommended", label: "Recommended", Icon: Sparkles },
   { id: "upi", label: "UPI", Icon: Smartphone },
@@ -43,12 +40,42 @@ const formatExpiry = (v) => {
   return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
 };
 
+const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+// Module-level, not component state — every PaymentSheet instance across the app shares one
+// injected <script> tag instead of re-adding it (and re-downloading it) on every open.
+let razorpayScriptPromise = null;
+const loadRazorpayScript = () => {
+  if (window.Razorpay) return Promise.resolve(true);
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+  razorpayScriptPromise = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = RAZORPAY_SCRIPT_SRC;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+  return razorpayScriptPromise;
+};
+
+// Opens a gateway order (POST /payment/order) the moment this sheet is shown. The backend's
+// active PaymentProvider decides what happens next: PAYMENT_PROVIDER=razorpay hands back a
+// real order (order.provider === "razorpay") and this sheet opens Razorpay's own hosted
+// Checkout widget instead of rendering anything of its own below; PAYMENT_PROVIDER=fake (the
+// default — no gateway credentials configured yet) hands back a mock order
+// (order.provider === "fake") and this sheet falls back to the simulated category-list ->
+// method-detail -> PIN/processing -> success flow it always used, purely for UX/demo purposes.
+// Either way, POST /payment/verify is what actually records the payment server-side — this
+// sheet never marks anything paid on its own say-so.
+//
 // allowPayLater (default true) hides the "Pay Later" category entirely — used for bookings
 // above the advance-payment threshold, where a 20% advance is required instead (see
 // ADVANCE_PAYMENT_THRESHOLD in gadidosti-backend's booking.controller.js and RequestDriver.jsx,
 // which is the only caller that ever passes false). title overrides the left summary panel's
 // "Price Summary" label, e.g. to "20% Advance" when `amount` is the advance, not the full price.
-export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, onPayLater, allowPayLater = true, title = "Price Summary" }) {
+export default function PaymentSheet({
+  open, bookingId, payType = "full", amount, phone, token,
+  onClose, onSuccess, onPayLater, allowPayLater = true, title = "Price Summary",
+}) {
   const CATEGORIES = allowPayLater ? [...BASE_CATEGORIES, PAY_LATER_CATEGORY] : BASE_CATEGORIES;
   const [stage, setStage] = useState("methods"); // methods -> pin -> processing -> success
   const [category, setCategory] = useState("recommended");
@@ -58,6 +85,13 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
   const [wallet, setWallet] = useState(null);
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
+  // 'checking' while /payment/order is in flight, then 'fake' or 'razorpay' — the demo UI below
+  // only ever renders once this resolves to 'fake' (or 'checking' fails outright, treated the
+  // same way so a network hiccup degrades to the always-available demo path, not a dead sheet).
+  const [gateway, setGateway] = useState("checking");
+  const [order, setOrder] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -69,7 +103,83 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
     setWallet(null);
     setPin("");
     setShowPin(false);
+    setGateway("checking");
+    setOrder(null);
+    setVerifying(false);
+    setVerifyError("");
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.post(`/api/bookings/${bookingId}/payment/order`, { pay_type: payType }, token);
+        if (cancelled) return;
+        if (!res?.success || !res.data?.order) throw new Error(res?.message || "Could not start payment");
+        setOrder(res.data.order);
+        setGateway(res.data.order.provider === "razorpay" ? "razorpay" : "fake");
+      } catch {
+        if (!cancelled) setGateway("fake"); // demo checkout still works even if the order call itself fails
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, bookingId, payType, token]);
+
+  // Verifies with the backend and hands the caller the freshly re-projected booking — this is
+  // the ONLY path that actually results in onSuccess firing, for both gateway branches below.
+  const verifyAndFinish = async (payload, paymentMode) => {
+    setVerifying(true);
+    setVerifyError("");
+    try {
+      const res = await api.post(`/api/bookings/${bookingId}/payment/verify`, {
+        order_id: order.orderId, pay_type: payType, payment_mode: paymentMode, ...payload,
+      }, token);
+      if (!res?.success) throw new Error(res?.message || "Payment verification failed");
+      onSuccess(res.data?.booking);
+    } catch (err) {
+      setVerifyError(err?.message || "Payment verification failed");
+      setVerifying(false);
+    }
+  };
+
+  // Real Razorpay path — opens the moment both the script and the order are ready, and never
+  // renders this component's own demo UI at all (Razorpay draws its own full overlay).
+  useEffect(() => {
+    if (!open || gateway !== "razorpay" || !order) return;
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadRazorpayScript();
+      if (cancelled) return;
+      if (!loaded) {
+        setGateway("fake"); // script blocked/offline — fall back rather than leaving a dead sheet
+        return;
+      }
+      const rzp = new window.Razorpay({
+        key: order.keyId,
+        amount: Math.round(Number(order.amount) * 100),
+        currency: order.currency || "INR",
+        order_id: order.orderId,
+        name: "GadiDost Logistics",
+        description: title,
+        prefill: phone ? { contact: phone } : undefined,
+        theme: { color: "#1976FF" },
+        handler: (response) => {
+          verifyAndFinish({
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          }, "razorpay");
+        },
+        modal: { ondismiss: () => onClose() },
+      });
+      rzp.on("payment.failed", (response) => {
+        setVerifyError(response?.error?.description || "Payment failed");
+      });
+      rzp.open();
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, gateway, order]);
 
   useEffect(() => {
     if (stage !== "processing") return;
@@ -78,12 +188,18 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
   }, [stage]);
 
   useEffect(() => {
-    if (stage !== "success") return;
-    const t = setTimeout(() => onSuccess(category === "recommended" ? "upi" : category), 1300);
+    if (stage !== "success" || !order) return;
+    const t = setTimeout(() => {
+      verifyAndFinish({}, category === "recommended" ? "upi" : category);
+    }, 1300);
     return () => clearTimeout(t);
-  }, [stage, onSuccess]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, order]);
 
   if (!open) return null;
+  // Nothing to render while the order call is in flight, or once Razorpay's own overlay has
+  // taken over — a blank frame for a beat is preferable to flashing the demo UI first.
+  if (gateway === "checking" || gateway === "razorpay") return null;
 
   const amountLabel = `₹${Number(amount || 0).toLocaleString("en-IN")}`;
   const goToPin = () => setStage("pin");
@@ -140,6 +256,12 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
               <X className="w-4 h-4 text-neutral-400" />
             </button>
           </div>
+
+          {verifyError && (
+            <div className="mx-5 mt-3 flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 text-danger text-xs flex-shrink-0">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> {verifyError}
+            </div>
+          )}
 
           {stage === "methods" && (
             <div className="flex flex-1 min-h-0">
@@ -361,7 +483,7 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
 
           {(stage === "processing" || stage === "success") && (
             <div className="flex-1 flex flex-col items-center justify-center">
-              {stage === "processing" ? (
+              {stage === "processing" || verifying ? (
                 <div className="w-14 h-14 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-5" />
               ) : (
                 <div className="animate-bounce-in w-16 h-16 rounded-full bg-success flex items-center justify-center mb-5 shadow-glow-green">
@@ -369,9 +491,9 @@ export default function PaymentSheet({ open, amount, phone, onClose, onSuccess, 
                 </div>
               )}
               <p className="font-poppins font-semibold text-lg text-neutral-800">
-                {stage === "processing" ? "Processing payment..." : "Payment successful"}
+                {stage === "processing" || verifying ? "Processing payment..." : "Payment successful"}
               </p>
-              {stage === "success" && <p className="text-sm text-neutral-400 mt-1">{amountLabel} paid</p>}
+              {stage === "success" && !verifying && <p className="text-sm text-neutral-400 mt-1">{amountLabel} paid</p>}
             </div>
           )}
         </div>

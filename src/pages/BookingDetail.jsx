@@ -86,13 +86,12 @@ export default function BookingDetail() {
     toast.success("Booking cancelled");
   };
 
-  const handlePaySuccess = async () => {
+  const handlePaySuccess = async (paidBooking) => {
     setShowPaymentSheet(false);
     if (!booking) return;
     try {
-      const res = await api.patch(`/api/bookings/${booking.id}/pay`, {}, token);
-      if (!res?.success) throw new Error(res?.message || "Failed to record payment");
-      setBooking((current) => (current ? { ...current, paymentStatus: "Paid" } : current));
+      if (!paidBooking) throw new Error("Failed to record payment");
+      setBooking((current) => (current ? { ...current, paymentStatus: paidBooking.paymentStatus || "Paid" } : current));
       toast.success("Payment recorded — thank you!");
     } catch (err) {
       toast.error(err?.message || "Failed to record payment");
@@ -596,6 +595,9 @@ export default function BookingDetail() {
 
       <PaymentSheet
         open={showPaymentSheet}
+        bookingId={booking.id}
+        payType="full"
+        token={token}
         // A "Partial" booking already paid its 20% advance — charge only what's actually left,
         // not the full original amount again (amountPaid comes from the same booking projection
         // that already powers the payment-status badge above).

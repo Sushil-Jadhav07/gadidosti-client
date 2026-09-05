@@ -174,14 +174,9 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     }
   };
 
-  const handlePaySuccess = async (paymentMode) => {
+  const handlePaySuccess = async (paidBooking) => {
     setShowPaymentSheet(false);
-    try {
-      const res = await api.patch(`/api/bookings/${bookingId}/pay`, { payment_mode: paymentMode, pay_type: paymentIntent }, token);
-      if (!res?.success) throw new Error(res?.message || "Failed to record payment");
-    } catch (err) {
-      toast.error(err?.message || "Failed to record payment");
-    }
+    if (!paidBooking) toast.error("Failed to record payment");
     setPaid(true);
   };
 
@@ -563,6 +558,9 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
 
       <PaymentSheet
         open={showPaymentSheet}
+        bookingId={bookingId}
+        payType={paymentIntent}
+        token={token}
         amount={paymentIntent === "advance" ? advanceAmount : finalAmount}
         title={paymentIntent === "advance" ? `${ADVANCE_PAYMENT_PCT * 100}% Advance` : "Price Summary"}
         phone={user?.phone}

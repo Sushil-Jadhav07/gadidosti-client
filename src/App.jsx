@@ -22,6 +22,7 @@ import Chats from "./pages/Chats";
 import ChatDetail from "./pages/ChatDetail";
 import Profile from "./pages/Profile";
 import SavedAddresses from "./pages/SavedAddresses";
+import AddressForm from "./pages/AddressForm";
 import PaymentMethods from "./pages/PaymentMethods";
 import Notifications from "./pages/Notifications";
 
@@ -33,6 +34,7 @@ const PAGE_TITLES = {
   "/chats": "Chats",
   "/profile": "My Profile",
   "/addresses": "Saved Addresses",
+  "/addresses/new": "Add Address",
   "/payment-methods": "Payment Methods",
   "/notifications": "Notifications",
 };
@@ -208,6 +210,26 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <SavedAddresses />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/addresses/new"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <AddressForm />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/addresses/:id/edit"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <AddressForm />
             </WebLayout>
           </ProtectedRoute>
         }

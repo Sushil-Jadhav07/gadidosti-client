@@ -1,19 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, MapPin, Plus, Pencil, Trash2, Star, Building2, AlertCircle,
+  ArrowLeft, MapPin, Plus, Pencil, Trash2, Star,
   Search, SlidersHorizontal, LayoutGrid, List, PackagePlus, PackageMinus, Phone,
 } from "lucide-react";
-import BottomSheet from "../components/BottomSheet";
-import MapView from "../components/MapView";
-import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-
-const EMPTY_FORM = {
-  label: "", address: "", floor: "", lat: null, lng: null, city: "",
-  addressType: "pickup", contactName: "", contactPhone: "",
-};
 
 const TYPE_META = {
   pickup: { label: "Pickup", Icon: PackagePlus, className: "bg-primary-50 text-primary" },
@@ -40,11 +32,6 @@ export default function SavedAddresses() {
   const [showFilter, setShowFilter] = useState(false);
   const [view, setView] = useState("grid");
 
-  const [showSheet, setShowSheet] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
   const [deletingId, setDeletingId] = useState(null);
 
   const load = async () => {
@@ -75,65 +62,8 @@ export default function SavedAddresses() {
     });
   }, [addresses, query, typeFilter]);
 
-  const openAdd = () => {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setFormError("");
-    setShowSheet(true);
-  };
-
-  const openEdit = (addr) => {
-    setEditingId(addr.id);
-    setForm({
-      label: addr.label, address: addr.address, floor: addr.floor || "",
-      lat: addr.lat, lng: addr.lng, city: addr.city || "",
-      addressType: addr.addressType || "pickup",
-      contactName: addr.contactName || "", contactPhone: addr.contactPhone || "",
-    });
-    setFormError("");
-    setShowSheet(true);
-  };
-
-  const handlePlaceSelect = ({ address, lat, lng, city }) => {
-    setForm((f) => ({ ...f, address, lat, lng, city: city || f.city }));
-  };
-
-  const handleSave = async () => {
-    setFormError("");
-    if (!form.label.trim()) return setFormError("Give this address a name, e.g. \"Home\" or \"Warehouse\"");
-    if (!form.address.trim()) return setFormError("Search and select an address from Google Maps");
-
-    setSaving(true);
-    try {
-      const payload = {
-        label: form.label.trim(),
-        address: form.address.trim(),
-        floor: form.floor.trim() || undefined,
-        lat: form.lat,
-        lng: form.lng,
-        city: form.city || undefined,
-        address_type: form.addressType,
-        contact_name: form.contactName.trim() || undefined,
-        contact_phone: form.contactPhone.trim() || undefined,
-      };
-      const res = editingId
-        ? await api.patch(`/api/addresses/${editingId}`, payload, token)
-        : await api.post("/api/addresses", payload, token);
-      if (!res?.success) throw new Error(res?.message || "Failed to save address");
-
-      if (editingId) {
-        setAddresses((current) => current.map((a) => (a.id === editingId ? res.data.address : a)));
-      } else {
-        setAddresses((current) => [res.data.address, ...current]);
-      }
-      toast.success(editingId ? "Address updated" : "Address saved");
-      setShowSheet(false);
-    } catch (err) {
-      setFormError(err.message || "Failed to save address");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const openAdd = () => navigate("/addresses/new");
+  const openEdit = (addr) => navigate(`/addresses/${addr.id}/edit`, { state: { address: addr } });
 
   const handleSetDefault = async (id) => {
     try {
@@ -392,135 +322,6 @@ export default function SavedAddresses() {
         </div>
       )}
 
-      <BottomSheet isOpen={showSheet} onClose={() => setShowSheet(false)}>
-        <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-5">
-          {editingId ? "Edit Address" : "Add Address"}
-        </h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Type</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(TYPE_META).map(([id, { label, Icon }]) => (
-                <button
-                  key={id}
-                  onClick={() => setForm((f) => ({ ...f, addressType: id }))}
-                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
-                    form.addressType === id ? "border-primary bg-primary-50 text-primary" : "border-neutral-100 text-neutral-500 hover:border-neutral-200"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" /> {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Name</label>
-            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
-              <Building2 className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
-              <input
-                type="text"
-                value={form.label}
-                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-                placeholder="e.g. Home, Office, Warehouse 2"
-                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                maxLength={60}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Address</label>
-            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
-              <MapPin className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
-              <PlacesAutocompleteInput
-                value={form.address}
-                onChange={(v) => setForm((f) => ({ ...f, address: v, lat: null, lng: null }))}
-                onPlaceSelect={handlePlaceSelect}
-                placeholder="Search on Google Maps..."
-                className="bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300 w-full"
-              />
-            </div>
-            <p className="text-[11px] text-neutral-400 mt-1.5">Pick a result from the search — that's what saves the exact map location.</p>
-          </div>
-
-          {form.lat != null && form.lng != null && (
-            <MapView
-              markers={[{ id: "picked", position: { lat: form.lat, lng: form.lng }, color: "blue", title: form.address }]}
-              height="160px"
-              className="rounded-xl overflow-hidden"
-              zoom={15}
-            />
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">
-              Floor / Unit <span className="text-neutral-300 font-normal normal-case">(optional)</span>
-            </label>
-            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
-              <input
-                type="text"
-                value={form.floor}
-                onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value }))}
-                placeholder="e.g. 3rd Floor, Flat 402, Gate 2"
-                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                maxLength={100}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">
-                Contact Name <span className="text-neutral-300 font-normal normal-case">(optional)</span>
-              </label>
-              <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
-                <input
-                  type="text"
-                  value={form.contactName}
-                  onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))}
-                  placeholder="On-site contact"
-                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                  maxLength={60}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">
-                Contact Phone <span className="text-neutral-300 font-normal normal-case">(optional)</span>
-              </label>
-              <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
-                <Phone className="w-3.5 h-3.5 text-neutral-300 mr-2 flex-shrink-0" />
-                <input
-                  type="tel"
-                  value={form.contactPhone}
-                  onChange={(e) => setForm((f) => ({ ...f, contactPhone: e.target.value }))}
-                  placeholder="+91"
-                  className="flex-1 min-w-0 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                  maxLength={20}
-                />
-              </div>
-            </div>
-          </div>
-
-          {formError && (
-            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {formError}
-            </div>
-          )}
-
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {saving ? (
-              <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving...</>
-            ) : editingId ? "Save Changes" : "Save Address"}
-          </button>
-        </div>
-      </BottomSheet>
     </div>
   );
 }

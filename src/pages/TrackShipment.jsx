@@ -167,7 +167,17 @@ export default function TrackShipment() {
         toast.success("Delivery complete! Please rate your trip.");
         setShowRateNudge(true);
       }
-      return { ...current, status: newStatus };
+      // currentStep drives the Shipment Timeline card below — without recomputing it here too,
+      // the timeline stayed stuck on whatever step it loaded at while the status badge (which
+      // reads `status` directly) kept updating live, the two visibly disagreeing on-screen.
+      // Same lookup adaptBooking itself uses, so this can never compute a different step than a
+      // fresh load of the same status would.
+      const newStep = Math.max(
+        current.timeline.findIndex((step) => step === newStatus),
+        TIMELINE_STEPS.findIndex((step) => step === newStatus),
+        0
+      );
+      return { ...current, status: newStatus, currentStep: newStep };
     });
     setRefreshTick((n) => n + 1);
   });

@@ -142,6 +142,10 @@ export default function BookTruck() {
     return stored?.step && stored.step < 5 ? stored.step : 1;
   });
   const [cities, setCities] = useState(FALLBACK_CITIES);
+  // Quick-pick chips on Step 1 (see the Saved Addresses section, right above Popular Cities) —
+  // fetched once, same as cities/materialTypes below, just from a different endpoint since
+  // these are per-client, not admin-configured.
+  const [savedAddresses, setSavedAddresses] = useState([]);
   const [materialTypes, setMaterialTypes] = useState(FALLBACK_MATERIALS);
   const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS);
   const [configError, setConfigError] = useState(false);
@@ -452,6 +456,15 @@ export default function BookTruck() {
       toast.error("Couldn't load latest booking options, using defaults");
     });
   }, [toast]);
+
+  // Saved-address quick-picks for Step 1 — a separate, silent-on-failure fetch from the public
+  // config load above, since this is a nice-to-have shortcut, not something worth an error toast
+  // over (the client can still just type/search an address like always).
+  useEffect(() => {
+    api.get("/api/addresses", token)
+      .then((res) => { if (res?.success) setSavedAddresses(res.data?.addresses || []); })
+      .catch(() => {});
+  }, [token]);
 
   // Live price estimate: refetch whenever the core fields change, regardless of step
   useEffect(() => {
@@ -1185,6 +1198,39 @@ export default function BookTruck() {
                           ? `Intra-City trip${form.city ? ` — both ends are in ${form.city}` : ""}`
                           : "Inter-City trip — pickup and drop are in different cities"}
                       </p>
+                    </div>
+                  )}
+
+                  {savedAddresses.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Saved Addresses</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {savedAddresses.map((addr) => {
+                          const isDropoff = addr.addressType === "dropoff";
+                          const Icon = isDropoff ? PackageMinus : PackagePlus;
+                          const isActive = (isDropoff ? form.drop : form.pickup) === addr.address;
+                          return (
+                            <button
+                              key={addr.id}
+                              type="button"
+                              onClick={() => {
+                                const target = isDropoff ? "drop" : "pickup";
+                                updateForm(target, addr.address);
+                                updateForm(target === "drop" ? "dropLat" : "pickupLat", addr.lat);
+                                updateForm(target === "drop" ? "dropLng" : "pickupLng", addr.lng);
+                                updateForm(target === "drop" ? "dropCity" : "pickupCity", addr.city || null);
+                              }}
+                              title={addr.address}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                isActive ? "bg-primary text-white" : "bg-primary-50 text-primary hover:bg-primary/15"
+                              }`}
+                            >
+                              <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                              {addr.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
