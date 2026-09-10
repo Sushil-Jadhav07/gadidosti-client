@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star, Link2 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
@@ -9,7 +9,7 @@ import MapView from "../components/MapView";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, formatBookingStatus, TIMELINE_STEPS } from "../utils";
+import { adaptBooking, bookingRef, formatBookingStatus, TIMELINE_STEPS, shareTrackingLink } from "../utils";
 import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
 import { useTruckLocationSocket } from "../hooks/useTruckLocationSocket";
 
@@ -86,7 +86,29 @@ export default function TrackShipment() {
   // not just because the booking happens to already be delivered on load, which would nudge for
   // a rating every time this page is revisited for an old delivered shipment.
   const [showRateNudge, setShowRateNudge] = useState(false);
+  const [sharingTracking, setSharingTracking] = useState(false);
   const token = getToken();
+
+  // Same share-link flow as BookingDetail.jsx's "Share Tracking" button — creates (or re-fetches)
+  // a public share link for the active booking and hands it off via the native share sheet, or
+  // copies it to the clipboard as a fallback.
+  const handleShareTracking = async () => {
+    if (sharingTracking || !activeBooking) return;
+    setSharingTracking(true);
+    try {
+      const res = await api.post(`/api/bookings/${activeBooking.id}/track/share-link`, {}, token);
+      if (!res?.success || !res.data?.shareUrl) throw new Error(res?.message || "Failed to create tracking link");
+      const outcome = await shareTrackingLink({
+        url: res.data.shareUrl,
+        text: `Track ${bookingRef(activeBooking)} (${activeBooking.pickup || ""} → ${activeBooking.drop || ""})`,
+      });
+      if (outcome === "copied") toast.success("Tracking link copied to clipboard");
+    } catch (err) {
+      if (err?.name !== "AbortError") toast.error(err?.message || "Failed to share tracking link");
+    } finally {
+      setSharingTracking(false);
+    }
+  };
 
   useEffect(() => {
     const loadLatest = async () => {
@@ -347,7 +369,17 @@ export default function TrackShipment() {
                   long real addresses (not short city names) never squeeze this row unevenly. */}
               <div className="flex items-center justify-between gap-2 mb-4">
                 <p className="text-xs text-neutral-400 font-medium">{bookingRef(activeBooking)}</p>
-                <StatusBadge status={activeBooking.status} />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleShareTracking}
+                    disabled={sharingTracking}
+                    title="Share tracking link"
+                    className="w-7 h-7 rounded-full bg-neutral-50 flex items-center justify-center text-neutral-400 hover:text-primary hover:bg-primary-50 transition-colors disabled:opacity-50"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                  </button>
+                  <StatusBadge status={activeBooking.status} />
+                </div>
               </div>
 
               {/* Route rail — pickup, any extra loading/unloading stops, then drop, each on its

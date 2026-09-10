@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Check, Download, Mail, XCircle, Truck, Copy, User, Building2,
-  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
@@ -12,7 +12,7 @@ import TripChatFab from "../components/TripChatFab";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId, shareInvoicePdf } from "../utils";
+import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId, shareInvoicePdf, shareTrackingLink } from "../utils";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
 
@@ -48,6 +48,7 @@ export default function BookingDetail() {
   const [loadingPod, setLoadingPod] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
+  const [sharingTracking, setSharingTracking] = useState(false);
 
   const loadBooking = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -136,6 +137,28 @@ export default function BookingDetail() {
       if (err?.name !== "AbortError") toast.error(err?.message || "Failed to share invoice");
     } finally {
       setSharingInvoice(false);
+    }
+  };
+
+  // Creates (or re-fetches — the backend endpoint is idempotent) a public share link for this
+  // booking's live tracking and hands it off via the native share sheet, or copies it to the
+  // clipboard if that's not available. No PDF/blob involved this time — shareUrl is already the
+  // full absolute link the backend builds (see /t/:token, PublicTracking.jsx).
+  const handleShareTracking = async () => {
+    if (sharingTracking || !booking) return;
+    setSharingTracking(true);
+    try {
+      const res = await api.post(`/api/bookings/${booking.id}/track/share-link`, {}, token);
+      if (!res?.success || !res.data?.shareUrl) throw new Error(res?.message || "Failed to create tracking link");
+      const outcome = await shareTrackingLink({
+        url: res.data.shareUrl,
+        text: `Track ${bookingRef(booking)} (${booking.pickup || ""} → ${booking.drop || ""})`,
+      });
+      if (outcome === "copied") toast.success("Tracking link copied to clipboard");
+    } catch (err) {
+      if (err?.name !== "AbortError") toast.error(err?.message || "Failed to share tracking link");
+    } finally {
+      setSharingTracking(false);
     }
   };
 
@@ -441,6 +464,16 @@ export default function BookingDetail() {
                 >
                   <Navigation className="w-4 h-4 flex-shrink-0" />
                   Track Live
+                </button>
+              )}
+              {isLive && (
+                <button
+                  onClick={handleShareTracking}
+                  disabled={sharingTracking}
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                >
+                  <Link2 className="w-4 h-4 flex-shrink-0" />
+                  {sharingTracking ? "Preparing..." : "Share Tracking"}
                 </button>
               )}
               {INVOICE_READY_STATUSES.includes(booking.status) && (

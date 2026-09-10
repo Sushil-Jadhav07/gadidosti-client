@@ -18,6 +18,7 @@ import BookTruck from "./pages/BookTruck";
 import MyBookings from "./pages/MyBookings";
 import BookingDetail from "./pages/BookingDetail";
 import TrackShipment from "./pages/TrackShipment";
+import PublicTracking from "./pages/PublicTracking";
 import Chats from "./pages/Chats";
 import ChatDetail from "./pages/ChatDetail";
 import Profile from "./pages/Profile";
@@ -124,6 +125,12 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
+      {/* Public tracking share link (see BookingDetail.jsx / TrackShipment.jsx's "Share
+          Tracking" actions) — deliberately outside both ProtectedRoute and PublicRoute (the
+          latter would incorrectly redirect an already-logged-in visitor away from a link meant
+          for anyone) and outside WebLayout (no sidebar/header, no authenticated-only chrome).
+          Whoever the link is shared with may not have — or need — an account at all. */}
+      <Route path="/t/:token" element={<PublicTracking />} />
       <Route
         path="/"
         element={

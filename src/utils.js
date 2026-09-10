@@ -151,6 +151,21 @@ export const shareInvoicePdf = async ({ blob, filename, text }) => {
   }
 };
 
+// Shares a plain tracking URL via the browser's native share sheet where available, falling
+// back to copy-to-clipboard on desktop/unsupported browsers — same navigator.share-first,
+// clipboard-fallback convention as shareInvoicePdf above, just for a URL instead of a file
+// (there's nothing to attach here, so navigator.canShare's file-capability check doesn't apply).
+// Returns "shared" or "copied" so the caller knows whether a toast confirmation is needed (a
+// successful native share already shows its own system UI; a clipboard copy needs one).
+export const shareTrackingLink = async ({ url, title = "Track your shipment", text }) => {
+  if (navigator.share) {
+    await navigator.share({ title, text, url });
+    return "shared";
+  }
+  await navigator.clipboard.writeText(url);
+  return "copied";
+};
+
 export const adaptBooking = (booking) => {
   if (!booking) return null;
   const timeline = Array.isArray(booking.timeline) ? booking.timeline.map(formatBookingStatus) : [];
