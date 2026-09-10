@@ -813,6 +813,16 @@ export default function BookTruck() {
     (step === 3 && !!form.truckType && !!form.searchMode && (form.searchMode !== "broker" || !!form.selectedBrokerId)) ||
     (step === 4 && !!priceBreakdown?.total && !loadingQuote);
 
+  // A disabled Continue button with no explanation just looks broken — this fills in exactly
+  // what's still missing on Step 3, where there are three independent things to pick (truck
+  // category, search mode, and — only in broker mode — a specific broker) and it's easy to do
+  // two of the three and not notice the third is still unset.
+  const step3MissingHint = step === 3 && !canContinue
+    ? (!form.truckType ? "Select a truck category to continue"
+      : !form.searchMode ? "Choose Find Truck or Search for Broker to continue"
+      : "Select a broker to continue")
+    : null;
+
   // No success screen here anymore — creating the booking just moves on to Choose Broker.
   // "Booking Confirmed" now shows at the end of that screen, after a broker is locked in
   // and payment (if any) is recorded — see ChooseBroker.jsx.
@@ -1904,7 +1914,9 @@ export default function BookTruck() {
               {/* Navigation Buttons — pinned as the card's own footer, not the page's, so
                   Back/Next stay put without scrolling even while the step content above
                   scrolls internally. */}
-              <div className="flex gap-3 justify-end px-5 md:px-8 py-4 border-t border-neutral-100 flex-shrink-0">
+              <div className="flex items-center gap-3 justify-between px-5 md:px-8 py-4 border-t border-neutral-100 flex-shrink-0">
+                <p className="text-xs text-neutral-400">{step3MissingHint}</p>
+                <div className="flex gap-3">
                 {step > 1 && (
                   <button
                     onClick={() => setStep(step - 1)}
@@ -1936,6 +1948,7 @@ export default function BookTruck() {
                     : "Continue"}
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                 </button>
+                </div>
               </div>
             </div>
           </div>
