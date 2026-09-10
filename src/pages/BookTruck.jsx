@@ -1,23 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, ArrowDown, MapPin, Package, Weight, Hash, ClipboardList, Zap,
-  Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus, Crosshair,
+  Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus, Crosshair, Radar, CalendarClock, Ruler, Phone,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
-import NearbyTrucksMap from "../components/NearbyTrucksMap";
 import MapView from "../components/MapView";
 import ChooseBroker from "./ChooseBroker";
-import RequestDriver from "./RequestDriver";
+import FindTruckSearch from "./FindTruckSearch";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import {
-  bookingRef, setStoredDriverRequestId, getStoredDriverRequestId, clearStoredDriverRequestId, haversineDistanceKm,
+  bookingRef, haversineDistanceKm,
   getStoredBookingWizardState, setStoredBookingWizardState, clearStoredBookingWizardState,
 } from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
+
+// Backend default when search_radius_km is omitted (see gadidosti-backend's
+// booking.controller.js DEFAULT_BROADCAST_RADIUS_KM) — mirrored here purely so the slider
+// starts wherever an omitted radius would resolve to server-side, not because the client needs
+// to omit it (the new UI always sends search_radius_km explicitly in "truck" mode).
+const DEFAULT_SEARCH_RADIUS_KM = 15;
 
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
 // ever shown when the live, admin-configured pricing couldn't be fetched at all (see
@@ -52,8 +58,15 @@ const INITIAL_FORM = {
   materialType: "",
   notes: "",
   truckType: null,
-  selectedTruckId: null,
-  selectedTruckReg: null,
+  // Book Now / Book Later ("is_scheduled") — see the toggle at the top of Step 1.
+  bookingMode: "now",
+  scheduledDateTime: "",
+  // Find Truck vs Search for Broker — mutually exclusive, chosen in Step 3. Exactly one of
+  // these two branches is ever populated/sent; there's no third "send neither" UI path anymore.
+  searchMode: null,
+  searchRadiusKm: DEFAULT_SEARCH_RADIUS_KM,
+  selectedBrokerId: null,
+  selectedBrokerName: null,
 };
 
 // Straight-line distance across the full visit order — pickup -> loading stops -> unloading
@@ -130,8 +143,61 @@ function MaterialTypeInput({ options, value, onChange, placeholder }) {
   );
 }
 
+// Step 5 for a Book Later booking — POST /api/bookings already created it (status 'pending'),
+// but the backend deliberately holds off broadcasting to anyone until ~2h before scheduled_date
+// (a cron sweep fires it automatically, see gadidosti-backend's scheduledBookingBroadcastSweep.js),
+// so there's nothing to negotiate or wait on here yet. Just confirms the schedule and sends the
+// client back to their bookings instead of dropping them into a live waiting screen that would
+// never update.
+function ScheduledConfirmation({ booking, navigate }) {
+  const audience = booking.searchMode === "broker" ? (booking.brokerName || "your selected broker") : "nearby drivers";
+  const formattedDate = booking.scheduledDate
+    ? new Date(booking.scheduledDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+      <div className="p-5 md:p-8">
+        <StepIndicator currentStep={5} onStepClick={undefined} embedded />
+        <div className="flex flex-col items-center text-center py-8">
+          <div className="w-20 h-20 rounded-full bg-primary-50 flex items-center justify-center mb-5">
+            <CalendarClock className="w-10 h-10 text-primary" />
+          </div>
+          <h2 className="font-poppins font-bold text-2xl text-neutral-800 mb-2">Booking Scheduled!</h2>
+          <p className="text-sm text-neutral-500 max-w-md mb-1">{booking.pickup} → {booking.drop}</p>
+          {formattedDate && (
+            <p className="text-sm font-semibold text-primary mb-4">{formattedDate}</p>
+          )}
+          <p className="text-sm text-neutral-500 max-w-md mb-8">
+            We'll notify {audience} closer to your pickup time — you don't need to do anything else right now.
+          </p>
+          <div className="bg-neutral-50 rounded-xl p-5 mb-8 w-full max-w-xs">
+            <p className="text-xs text-neutral-400 mb-1">Booking ID</p>
+            <p className="font-poppins font-bold text-2xl text-neutral-800">{booking.bookingNumber}</p>
+          </div>
+          <div className="flex gap-3 w-full max-w-xs">
+            <button
+              onClick={() => { clearStoredBookingWizardState(); navigate(`/bookings/${booking.id}`); }}
+              className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors"
+            >
+              View Booking
+            </button>
+            <button
+              onClick={() => { clearStoredBookingWizardState(); navigate("/"); }}
+              className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BookTruck() {
   const toast = useToast();
+  const navigate = useNavigate();
   const token = getToken();
   // Restored synchronously (not via an effect) so there's no flash of an empty Step 1 before
   // snapping to whatever step/form the client actually had — only for step<5 drafts, since a
@@ -166,17 +232,12 @@ export default function BookTruck() {
     return stored?.step && stored.step < 5 && stored.form ? { ...INITIAL_FORM, ...stored.form } : INITIAL_FORM;
   });
   const [focusedField, setFocusedField] = useState(null);
-  // Set once the booking is created at Review-confirm; drives the Choose Broker step, which
-  // renders inline in this same wizard instead of navigating to a separate route.
+  // Set once the booking is created at Review-confirm; drives the Choose Broker / Find Truck /
+  // Scheduled-confirmation step, which renders inline in this same wizard instead of navigating
+  // to a separate route. isScheduled/searchMode/searchRadiusKm come straight off the booking
+  // projection the server returned (or re-fetched on reload) — never assumed from local form
+  // state — since that's the single source of truth for which step-5 view to show.
   const [createdBooking, setCreatedBooking] = useState(null);
-  // Result of POST /api/bookings/:id/request-truck, when a specific truck was picked in Step 3 —
-  // set right after booking creation, drives RequestDriver instead of ChooseBroker for step 5
-  // until/unless the direct-driver attempt is abandoned (see showBrokerFallback below).
-  const [driverRequest, setDriverRequest] = useState(null);
-  // Flipped once the direct-driver request is declined, times out and the client gives up
-  // waiting, or the client explicitly skips it — switches step 5 over to the broker-broadcast
-  // flow, which was already kicked off automatically when the booking was created either way.
-  const [showBrokerFallback, setShowBrokerFallback] = useState(false);
   const [locatingPickup, setLocatingPickup] = useState(false);
   // Live "you are here" blue dot on the Step 1 map — watched only while Step 1 is showing, not
   // for the whole wizard's lifetime, since nothing past Step 1 needs it.
@@ -185,22 +246,24 @@ export default function BookTruck() {
   // Defaults to whichever of pickup/drop is still empty (see the auto-advance effect below), but
   // stays put once a stop is explicitly armed via its own "pin on map" button.
   const [pinTarget, setPinTarget] = useState("pickup");
-  // The DOM node NearbyTrucksMap portals its real, truck-populated map into for Step 3 — state
-  // (not a plain ref) so the callback ref below re-renders once the node actually mounts,
-  // letting the summary panel's right-hand column show the same live map instead of the
-  // generic route-only preview it uses on every other step.
-  const [truckMapNode, setTruckMapNode] = useState(null);
+  // Eligible-brokers list for the "Search for Broker" card in Step 3 — fetched lazily the first
+  // time that card is picked (not on every Step 3 visit, since a client who picks "Find Truck"
+  // never needs it), scoped to the booking's city when it's known (intra-city only).
+  const [eligibleBrokers, setEligibleBrokers] = useState([]);
+  const [loadingBrokers, setLoadingBrokers] = useState(false);
+  const [brokersError, setBrokersError] = useState(false);
   // True only while restoring step 5 after a reload (see the mount effect below) — the wizard
   // shows a loading state instead of Step 1 during this window rather than flashing Step 1
   // before jumping to Step 5 a moment later.
   const [rehydrating, setRehydrating] = useState(() => getStoredBookingWizardState()?.step >= 5);
 
   // Reload recovery — a reload used to always dump the client back to Step 1 even mid-
-  // negotiation, since step/createdBooking/driverRequest are all plain useState. Restores
-  // Step 5 by re-fetching the booking (for bookingNumber/askingPrice/pickup/drop — none of
-  // those are trustworthy from storage alone) and, if a direct-driver request was in flight,
-  // the driver request too, deciding the RequestDriver-vs-ChooseBroker branch the same way
-  // handleConfirm originally did.
+  // negotiation, since step/createdBooking are plain useState. Restores Step 5 by re-fetching
+  // the booking (for bookingNumber/askingPrice/pickup/drop/isScheduled/searchMode/
+  // searchRadiusKm — none of those are trustworthy from storage alone). Which child component
+  // step 5 renders is then decided the same way it is right after creation — see the render
+  // branch below — so there's no separate driver-request lookup here: FindTruckSearch and
+  // ChooseBroker both discover their own in-flight negotiation on mount.
   useEffect(() => {
     const stored = getStoredBookingWizardState();
     if (!stored?.bookingId || stored.step < 5) return;
@@ -220,17 +283,12 @@ export default function BookTruck() {
           askingPrice: booking.amount,
           pickup: booking.pickup,
           drop: booking.drop,
+          isScheduled: !!booking.isScheduled,
+          scheduledDate: booking.date || null,
+          searchMode: booking.searchMode || null,
+          searchRadiusKm: booking.searchRadiusKm,
+          brokerName: null,
         });
-
-        const storedRequestId = getStoredDriverRequestId(booking.id);
-        if (storedRequestId) {
-          try {
-            const requestRes = await api.get(`/api/driver-requests/${storedRequestId}`, token);
-            if (requestRes?.success && requestRes.data?.request) {
-              setDriverRequest(requestRes.data.request);
-            }
-          } catch { /* driver request no longer reachable — falls through to the broker flow */ }
-        }
 
         setStep(5);
       } catch {
@@ -268,6 +326,30 @@ export default function BookTruck() {
     ...prev,
     [key]: prev[key].map((stop, i) => (i === index ? { ...stop, ...patch } : stop)),
   }));
+
+  // GET /api/bookings/eligible-brokers — called lazily (see the effect below), not eagerly on
+  // every Step 3 visit, and callable again directly from the Retry link on failure.
+  const loadEligibleBrokers = async () => {
+    setLoadingBrokers(true);
+    setBrokersError(false);
+    try {
+      const qs = form.city ? `?city=${encodeURIComponent(form.city)}` : "";
+      const res = await api.get(`/api/bookings/eligible-brokers${qs}`, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to load brokers");
+      setEligibleBrokers(res.data?.brokers || []);
+    } catch {
+      setBrokersError(true);
+    } finally {
+      setLoadingBrokers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (form.searchMode === "broker" && !eligibleBrokers.length && !loadingBrokers && !brokersError) {
+      loadEligibleBrokers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.searchMode]);
 
   // Transport type is no longer a manual choice — it's derived from whichever cities the
   // pickup/drop addresses resolve to: same city → Intra-City, different cities → Inter-City.
@@ -591,20 +673,39 @@ export default function BookTruck() {
   // happens per-broker on the Choose Broker screen (counter-offers), not at booking time.
   const finalAmount = priceBreakdown?.total;
 
-  // Booking is created here, at Review-confirm — *before* a broker or driver is locked in.
-  // POST /api/bookings already broadcasts it to brokers automatically. If a specific truck was
-  // also picked in Step 3, request-truck sends that truck's driver a direct request in parallel
-  // — whichever responds and gets accepted first wins; the other side finds out via a 409 on its
-  // own accept attempt. payment_status starts 'pending' regardless of what the client intends to
-  // do later.
+  // Whether Step 1's Book Later date/time is actually valid to submit — used both to gate the
+  // Step 1 "Next" button and as a final guard here in case the client leaves it stale while
+  // clicking around between steps.
+  const scheduledDateTimeValid = form.bookingMode !== "later"
+    || (!!form.scheduledDateTime && new Date(form.scheduledDateTime).getTime() > Date.now());
+
+  // Booking is created here, at Review-confirm. search_mode/search_radius_km/broker_id (Step 3)
+  // and is_scheduled/scheduled_date (Step 1's Book Later toggle) are the two new, mutually-
+  // independent axes POST /api/bookings now takes — search_mode picks the audience (fan out to
+  // every nearby driver, or send to exactly one broker), is_scheduled just defers WHEN that
+  // audience is notified (immediately, or ~2h before scheduled_date via the backend's own cron
+  // sweep). The booking itself is always created immediately either way, status 'pending'.
   const handleConfirm = async () => {
     if (!priceBreakdown?.total) {
       toast.error("Price quote isn't ready yet — please wait a moment and try again.");
       return;
     }
+    if (!scheduledDateTimeValid) {
+      toast.error("Please choose a future date and time for your scheduled booking.");
+      return;
+    }
+    if (!form.searchMode) {
+      toast.error("Please choose how you'd like to find a truck.");
+      return;
+    }
+    if (form.searchMode === "broker" && !form.selectedBrokerId) {
+      toast.error("Please select a broker.");
+      return;
+    }
 
     const composedNotes = form.notes.trim();
     const selectedTruck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
+    const isScheduled = form.bookingMode === "later";
 
     setConfirming(true);
     try {
@@ -624,8 +725,8 @@ export default function BookTruck() {
         quantity: form.quantity,
         material: form.materialType,
         notes: composedNotes || undefined,
-        // No date/time picker in this flow yet — every booking is "now".
-        scheduled_date: new Date().toISOString(),
+        scheduled_date: isScheduled ? new Date(form.scheduledDateTime).toISOString() : new Date().toISOString(),
+        ...(isScheduled ? { is_scheduled: true } : {}),
         distance: priceBreakdown.distance,
         duration_min: priceBreakdown.durationMin,
         duration_in_traffic_min: priceBreakdown.durationInTrafficMin,
@@ -633,6 +734,9 @@ export default function BookTruck() {
         payment_status: "pending",
         add_loading_location: form.loadingLocations.filter((s) => s.lat != null && s.lng != null),
         add_unloading_location: form.unloadingLocations.filter((s) => s.lat != null && s.lng != null),
+        search_mode: form.searchMode,
+        ...(form.searchMode === "truck" ? { search_radius_km: form.searchRadiusKm } : {}),
+        ...(form.searchMode === "broker" ? { broker_id: form.selectedBrokerId } : {}),
       }, token);
 
       if (!response?.success) throw new Error(response?.message || "Failed to confirm booking");
@@ -644,67 +748,16 @@ export default function BookTruck() {
         askingPrice: finalAmount,
         pickup: form.pickup,
         drop: form.drop,
+        isScheduled: !!booking?.isScheduled,
+        scheduledDate: booking?.date || (isScheduled ? form.scheduledDateTime : null),
+        searchMode: booking?.searchMode || form.searchMode,
+        searchRadiusKm: booking?.searchRadiusKm ?? form.searchRadiusKm,
+        brokerName: form.searchMode === "broker" ? form.selectedBrokerName : null,
       });
-
-      // A specific truck was picked in Step 3 — try that driver directly before falling back
-      // to whatever brokers respond with. Failure here (truck taken in the meantime, etc.) is
-      // non-fatal: the booking already exists and was already broadcast to brokers, so step 5
-      // just shows the broker flow instead.
-      if (form.selectedTruckId && booking?.id) {
-        try {
-          const requestRes = await api.post(`/api/bookings/${booking.id}/request-truck`, {
-            truck_id: form.selectedTruckId,
-          }, token);
-          if (requestRes?.success && requestRes.data?.request) {
-            setDriverRequest(requestRes.data.request);
-            setStoredDriverRequestId(booking.id, requestRes.data.request.id);
-          }
-        } catch {
-          // Fall through to the broker flow below.
-        }
-      }
 
       setStep(5);
     } catch (err) {
       toast.error(err?.message || "Failed to confirm booking");
-    } finally {
-      setConfirming(false);
-    }
-  };
-
-  // The direct-pick driver (and their broker, once looped in after a timeout) both declined —
-  // rather than dropping straight into the broker-broadcast flow, let the client pick a
-  // different truck for the SAME booking (still 'pending' — the failed attempt never touched
-  // its status). Clearing selectedTruckId forces a fresh, explicit pick in Step 3 instead of
-  // silently re-requesting the truck that just declined.
-  const handleBackToTruckSelection = () => {
-    if (createdBooking?.id) clearStoredDriverRequestId(createdBooking.id);
-    setDriverRequest(null);
-    setForm((f) => ({ ...f, selectedTruckId: null }));
-    setStep(3);
-  };
-
-  // Re-runs just the request-truck half of handleConfirm against the EXISTING booking — used
-  // when the client picks a new truck after handleBackToTruckSelection, so this doesn't create
-  // a second, duplicate booking the way calling handleConfirm again would.
-  const handleRequestNewTruck = async () => {
-    if (!createdBooking?.id || !form.selectedTruckId) {
-      setStep(5);
-      return;
-    }
-    setConfirming(true);
-    try {
-      const requestRes = await api.post(`/api/bookings/${createdBooking.id}/request-truck`, {
-        truck_id: form.selectedTruckId,
-      }, token);
-      if (!requestRes?.success || !requestRes.data?.request) {
-        throw new Error(requestRes?.message || "Failed to request this truck");
-      }
-      setDriverRequest(requestRes.data.request);
-      setStoredDriverRequestId(createdBooking.id, requestRes.data.request.id);
-      setStep(5);
-    } catch (err) {
-      toast.error(err?.message || "Failed to request this truck — please try another.");
     } finally {
       setConfirming(false);
     }
@@ -740,23 +793,22 @@ export default function BookTruck() {
     }
   };
 
-  // The booking's already been created by the time the Choose Broker step is showing — there's
-  // no safe "previous step" to rewind to (Review's Confirm button would just create a second,
-  // duplicate booking). So going back from Choose Broker restarts the whole wizard fresh instead.
+  // The booking's already been created by the time the Choose Broker/Find Truck step is
+  // showing — there's no safe "previous step" to rewind to (Review's Confirm button would just
+  // create a second, duplicate booking). So going back restarts the whole wizard fresh instead.
   const resetFlow = () => {
     setStep(1);
     setCreatedBooking(null);
-    setDriverRequest(null);
-    setShowBrokerFallback(false);
     setForm(INITIAL_FORM);
     setPriceBreakdown(null);
+    setEligibleBrokers([]);
     clearStoredBookingWizardState();
   };
 
   const canContinue =
-    (step === 1 && !!form.pickup && !!form.drop && !!form.transportType) ||
+    (step === 1 && !!form.pickup && !!form.drop && !!form.transportType && scheduledDateTimeValid) ||
     step === 2 ||
-    (step === 3 && !!form.truckType) ||
+    (step === 3 && !!form.truckType && !!form.searchMode && (form.searchMode !== "broker" || !!form.selectedBrokerId)) ||
     (step === 4 && !!priceBreakdown?.total && !loadingQuote);
 
   // No success screen here anymore — creating the booking just moves on to Choose Broker.
@@ -765,6 +817,14 @@ export default function BookTruck() {
 
   const truck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
   const hasSummaryContent = form.transportType || form.pickup || form.drop || form.truckType;
+
+  // Earliest value the Book Later datetime-local input accepts — "now" expressed in local time
+  // (datetime-local's value/min are always local, never UTC), nudged 5 minutes out so a client
+  // who picks exactly "now" doesn't immediately fail the backend's "must be in the future" check.
+  const minScheduleValue = (() => {
+    const d = new Date(Date.now() + 5 * 60000);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  })();
 
   // Live map — pins fill in as each side gets geocoded (autocomplete selection, "Use current
   // location", or a city chip), full driving route once both are resolved. Always visible
@@ -810,20 +870,13 @@ export default function BookTruck() {
   // (grid's items-stretch below); the map is the whole panel, not a strip above some text.
   const bookingSummaryPanel = (
     <div className="relative rounded-2xl shadow-card overflow-hidden lg:sticky lg:top-6 h-full min-h-[520px]">
-      {step === 3 ? (
-        // Mount point NearbyTrucksMap portals its real, truck-populated map into (see
-        // truckMapNode above) — same full-bleed treatment as MapView below, just a live map
-        // with radius circle, traffic and truck markers instead of a plain route line.
-        <div ref={setTruckMapNode} className="absolute inset-0" />
-      ) : (
-        <MapView
-          routes={summaryMapRoutes}
-          markers={summaryMapMarkers}
-          height="100%"
-          className="absolute inset-0"
-          {...(step === 1 ? { onMapClick: handleMapClick, myLocation, suppressRouteMarkers: true } : {})}
-        />
-      )}
+      <MapView
+        routes={summaryMapRoutes}
+        markers={summaryMapMarkers}
+        height="100%"
+        className="absolute inset-0"
+        {...(step === 1 ? { onMapClick: handleMapClick, myLocation, suppressRouteMarkers: true } : {})}
+      />
 
       {hasSummaryContent && (
         <div className="absolute bottom-4 left-4 right-4 md:right-auto md:w-80 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 max-h-[calc(100%-2rem)] overflow-y-auto">
@@ -940,17 +993,20 @@ export default function BookTruck() {
   return (
     <div className="h-full flex flex-col p-1 animate-page-enter">
       <div className="w-full flex-1 min-h-0 flex flex-col">
-        {step === 5 && createdBooking && driverRequest && !showBrokerFallback ? (
-          <RequestDriver
+        {step === 5 && createdBooking && createdBooking.isScheduled ? (
+          // Book Later — nothing to negotiate yet, the backend defers the broadcast until
+          // shortly before scheduled_date (see scheduledBookingBroadcastSweep.js). No live
+          // waiting/negotiate screen makes sense here since nothing will happen for a while.
+          <ScheduledConfirmation booking={createdBooking} navigate={navigate} />
+        ) : step === 5 && createdBooking && createdBooking.searchMode === "truck" ? (
+          <FindTruckSearch
             bookingId={createdBooking.id}
             bookingNumber={createdBooking.bookingNumber}
             askingPrice={createdBooking.askingPrice}
             pickup={createdBooking.pickup}
             drop={createdBooking.drop}
-            initialRequest={driverRequest}
+            searchRadiusKm={createdBooking.searchRadiusKm}
             onBack={() => setStep(4)}
-            onFallbackToBrokers={() => setShowBrokerFallback(true)}
-            onBackToTruckSelection={handleBackToTruckSelection}
           />
         ) : step === 5 && createdBooking ? (
           <ChooseBroker
@@ -978,6 +1034,49 @@ export default function BookTruck() {
                   two cities, not chosen here) */}
               {step === 1 && (
                 <div className="animate-page-enter">
+                  {/* Book Now / Book Later — when Later is picked, the backend defers the
+                      driver/broker broadcast until shortly before scheduledDateTime instead of
+                      firing it the moment this booking is created (see is_scheduled in
+                      handleConfirm above). */}
+                  <div className="flex items-center gap-1 mb-4 bg-neutral-50 rounded-full p-1 w-fit">
+                    <button
+                      type="button"
+                      onClick={() => updateForm("bookingMode", "now")}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                        form.bookingMode !== "later" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5" /> Book Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateForm("bookingMode", "later")}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                        form.bookingMode === "later" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                      }`}
+                    >
+                      <CalendarClock className="w-3.5 h-3.5" /> Book Later
+                    </button>
+                  </div>
+
+                  {form.bookingMode === "later" && (
+                    <div className="mb-4">
+                      <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">
+                        Pickup Date &amp; Time
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={form.scheduledDateTime}
+                        min={minScheduleValue}
+                        onChange={(e) => updateForm("scheduledDateTime", e.target.value)}
+                        className="w-full bg-white border border-neutral-200 rounded-lg px-3 py-2.5 text-sm text-neutral-700 outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all"
+                      />
+                      <p className="text-[11px] text-neutral-400 mt-1.5">
+                        We'll notify nearby drivers/brokers about 2 hours before this time — you won't hear anything before then.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div>
                       <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">
@@ -1396,7 +1495,7 @@ export default function BookTruck() {
                 </div>
               )}
 
-              {/* Step 3 - Select Truck */}
+              {/* Step 3 - Truck category + how to find one (Find Truck vs Search for Broker) */}
               {step === 3 && (
                 <div className="animate-page-enter">
                   <button
@@ -1405,27 +1504,147 @@ export default function BookTruck() {
                   >
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
-                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Pick your truck</h2>
-                  <p className="text-sm text-neutral-400 mb-4">Tap a truck below to select it.</p>
+                  <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Find your truck</h2>
+                  <p className="text-sm text-neutral-400 mb-4">Pick a truck category, then choose how we should find you one.</p>
 
-                  {/* No more abstract category picker — form.truckType (needed for the price
-                      estimate and truck_category on submit) now comes from whichever real
-                      nearby truck the user taps, via its own category field. */}
-                  <NearbyTrucksMap
-                    pickupLat={form.pickupLat}
-                    pickupLng={form.pickupLng}
-                    dropLat={form.dropLat}
-                    dropLng={form.dropLng}
-                    stops={[...form.loadingLocations, ...form.unloadingLocations]}
-                    selectedTruckId={form.selectedTruckId}
-                    truckOptions={truckOptions}
-                    mapPortalNode={truckMapNode}
-                    onSelectTruck={(t) => {
-                      updateForm("selectedTruckId", t.id);
-                      updateForm("truckType", t.category);
-                      updateForm("selectedTruckReg", t.registration);
-                    }}
-                  />
+                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Truck Category</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
+                    {truckOptions.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => updateForm("truckType", t.id)}
+                        className={`p-3 rounded-xl border-2 text-left transition-all ${
+                          form.truckType === t.id ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                        }`}
+                      >
+                        <Truck className={`w-5 h-5 mb-2 ${form.truckType === t.id ? "text-primary" : "text-neutral-400"}`} />
+                        <p className="text-sm font-semibold text-neutral-800 truncate">{t.name}</p>
+                        <p className="text-[11px] text-neutral-400 truncate">{t.capacity}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Find Truck (fan-out broadcast to every nearby driver) vs Search for Broker
+                      (send to exactly one broker) — mutually exclusive: picking one clears the
+                      other's own fields (radius / selected broker) so there's no stale leftover
+                      state from a mode the client isn't using anymore. */}
+                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">How should we find your truck?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, searchMode: "truck", selectedBrokerId: null, selectedBrokerName: null }))}
+                      className={`text-left p-4 rounded-xl border-2 transition-all ${
+                        form.searchMode === "truck" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "truck" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
+                          <Radar className="w-4.5 h-4.5" />
+                        </span>
+                        <p className="font-poppins font-semibold text-sm text-neutral-800">Find Truck</p>
+                      </div>
+                      <p className="text-xs text-neutral-400">We notify every available driver nearby — first to accept gets the job.</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, searchMode: "broker" }))}
+                      className={`text-left p-4 rounded-xl border-2 transition-all ${
+                        form.searchMode === "broker" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "broker" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
+                          <Building2 className="w-4.5 h-4.5" />
+                        </span>
+                        <p className="font-poppins font-semibold text-sm text-neutral-800">Search for Broker</p>
+                      </div>
+                      <p className="text-xs text-neutral-400">Pick one broker yourself — the request goes only to them.</p>
+                    </button>
+                  </div>
+
+                  {form.searchMode === "truck" && (
+                    <div className="border border-neutral-100 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide flex items-center gap-1.5">
+                          <Ruler className="w-3.5 h-3.5" /> Search Radius
+                        </label>
+                        <span className="text-sm font-bold text-primary tabular-nums">{form.searchRadiusKm} km</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={form.searchRadiusKm}
+                        onChange={(e) => updateForm("searchRadiusKm", Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-[11px] text-neutral-400">1 km</span>
+                        <span className="text-[11px] text-neutral-400">100 km</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {form.searchMode === "broker" && (
+                    <div className="border border-neutral-100 rounded-xl p-4 max-h-80 overflow-y-auto">
+                      {loadingBrokers ? (
+                        <div className="flex items-center gap-2 py-6 justify-center">
+                          <span className="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                          <span className="text-xs text-neutral-400">Loading brokers...</span>
+                        </div>
+                      ) : brokersError ? (
+                        <div className="text-center py-4">
+                          <p className="text-xs text-danger mb-1.5">Couldn't load brokers.</p>
+                          <button onClick={loadEligibleBrokers} className="text-xs font-semibold text-primary hover:underline">Retry</button>
+                        </div>
+                      ) : eligibleBrokers.length === 0 ? (
+                        <p className="text-sm text-neutral-400 text-center py-6">
+                          No brokers available{form.city ? ` in ${form.city}` : ""} right now.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {eligibleBrokers.map((b) => {
+                            const isActive = form.selectedBrokerId === b.id;
+                            return (
+                              <button
+                                key={b.id}
+                                type="button"
+                                onClick={() => { updateForm("selectedBrokerId", b.id); updateForm("selectedBrokerName", b.name); }}
+                                className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border text-left transition-colors ${
+                                  isActive ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                                }`}
+                              >
+                                <div className="min-w-0 flex items-center gap-2.5">
+                                  <span className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isActive ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
+                                    <Building2 className="w-4 h-4" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-neutral-800 truncate">{b.name}</p>
+                                    <p className="text-[11px] text-neutral-400 truncate flex items-center gap-1">
+                                      {b.phone && <><Phone className="w-3 h-3 flex-shrink-0" />{b.phone}</>}
+                                      {b.serviceCity ? ` · ${b.serviceCity}` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <div className="flex flex-col items-end">
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${b.isOnline ? "bg-green-50 text-success" : "bg-neutral-100 text-neutral-400"}`}>
+                                      {b.isOnline ? "Online" : "Offline"}
+                                    </span>
+                                    <span className="text-[11px] text-neutral-400 mt-0.5">{b.truckCount} truck{b.truckCount === 1 ? "" : "s"}</span>
+                                  </div>
+                                  {isActive && <Check className="w-4 h-4 text-primary flex-shrink-0" />}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1439,7 +1658,16 @@ export default function BookTruck() {
                     <ArrowLeft className="w-4 h-4" /> Back
                   </button>
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Review Booking Details</h2>
-                  <p className="text-sm text-neutral-400 mb-6">Please review your booking details before confirming.</p>
+                  <p className="text-sm text-neutral-400 mb-4">Please review your booking details before confirming.</p>
+
+                  {form.bookingMode === "later" && (
+                    <div className="flex items-center gap-2.5 mb-4 px-3.5 py-2 rounded-lg border border-primary/20 bg-primary-50">
+                      <CalendarClock className="w-4 h-4 text-primary flex-shrink-0" />
+                      <p className="text-sm font-medium text-primary">
+                        Scheduled for {form.scheduledDateTime ? new Date(form.scheduledDateTime).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"} — we'll broadcast closer to pickup time.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <div className="lg:col-span-2 space-y-4">
@@ -1542,14 +1770,39 @@ export default function BookTruck() {
                             <span className="text-xs text-neutral-400">Capacity</span>
                             <span className="text-xs font-medium text-neutral-700 truncate">{truck?.capacity || "—"}</span>
                           </div>
-                          {form.selectedTruckReg && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-neutral-400">Registration</span>
-                              <span className="text-xs font-medium text-neutral-700 truncate">{form.selectedTruckReg}</span>
-                            </div>
-                          )}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Search Method — the mode chosen in Step 3, mutually exclusive. */}
+                    <div className="border border-neutral-100 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800">
+                          <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                            {form.searchMode === "broker" ? (
+                              <Building2 className="w-3.5 h-3.5 text-primary" />
+                            ) : (
+                              <Radar className="w-3.5 h-3.5 text-primary" />
+                            )}
+                          </span>
+                          How We'll Find Your Truck
+                        </p>
+                        <button
+                          onClick={() => setStep(3)}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                        >
+                          <Pencil className="w-3 h-3" /> Edit
+                        </button>
+                      </div>
+                      {form.searchMode === "broker" ? (
+                        <p className="text-sm text-neutral-700">
+                          Search for Broker — <span className="font-semibold">{form.selectedBrokerName || "a selected broker"}</span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-neutral-700">
+                          Find Truck — broadcast to every available driver within <span className="font-semibold">{form.searchRadiusKm} km</span>
+                        </p>
+                      )}
                     </div>
 
                   </div>
@@ -1643,10 +1896,6 @@ export default function BookTruck() {
                   onClick={() => {
                     if (step === 1) handleValidateLocation();
                     else if (step < 4) setStep(step + 1);
-                    // A truck was (re-)picked after handleBackToTruckSelection cleared
-                    // driverRequest — request it against the existing booking instead of just
-                    // resuming Step 5 with nothing to show there.
-                    else if (createdBooking && !driverRequest && form.selectedTruckId) handleRequestNewTruck();
                     // Revisiting Review via the Negotiation screen's back arrow means the
                     // booking already exists — just return to it instead of re-running
                     // handleConfirm, which would POST a second, duplicate booking.
@@ -1656,7 +1905,12 @@ export default function BookTruck() {
                   disabled={!canContinue || confirming || validatingLocation}
                   className="group px-6 md:px-8 py-3 bg-primary hover:bg-primary-dark text-white font-medium text-sm rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
                 >
-                  {step === 4 ? (confirming ? "Confirming..." : createdBooking ? "Back to Negotiation" : "Confirm & Proceed to Negotiation")
+                  {step === 4
+                    ? (confirming
+                        ? "Confirming..."
+                        : createdBooking
+                          ? (createdBooking.isScheduled ? "Back to Booking" : "Back to Negotiation")
+                          : (form.bookingMode === "later" ? "Schedule Booking" : "Confirm & Proceed to Negotiation"))
                     : step === 1 ? (validatingLocation ? "Validating..." : "Next Step")
                     : "Continue"}
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />

@@ -52,11 +52,15 @@ export const formatDate = (value) => {
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-// Bridges a booking to its in-flight direct-driver request (POST /api/bookings/:id/request-truck).
-// There's no backend endpoint to look up "the driver request for booking X" as a client (only
-// GET /api/driver-requests/:id by the request's own id, or driver/broker-scoped list endpoints) —
-// so the id is stashed here the moment BookTruck.jsx creates it, and MyBookings.jsx reads it back
-// to resume polling/negotiating if the user navigates away and returns via the bookings list.
+// Bridges a booking to whichever single driver_requests row the client is actively negotiating —
+// either a broker-assigned driver (ChooseBroker.jsx) or one driver promoted out of a "Find
+// Truck" fan-out (FindTruckSearch.jsx); RequestDriver.jsx itself sets this on mount either way.
+// There's no backend endpoint to look up "the driver request for booking X" as a client for a
+// single arbitrary id (only GET /api/driver-requests/:id by the request's own id, GET
+// /api/bookings/:id/driver-requests for the full fan-out, or driver/broker-scoped list
+// endpoints) — so the id is stashed here once negotiation narrows to one request, and
+// BookingDetail.jsx's DriverRequestPanel reads it back to resume polling if the client navigates
+// away and returns via the bookings list.
 const driverRequestStorageKey = (bookingId) => `ssk_driver_request_${bookingId}`;
 
 export const getStoredDriverRequestId = (bookingId) => {

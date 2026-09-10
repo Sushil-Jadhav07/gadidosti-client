@@ -31,13 +31,16 @@ const statusLabel = (request) => {
   return request.driverTimedOut ? "No response yet — their broker has been notified" : "Waiting for the driver to respond";
 };
 
-// Rendered as step 5 of the booking wizard (BookTruck.jsx) whenever a specific truck was picked
-// in Step 3 and POST /api/bookings/:id/request-truck succeeded — the direct-negotiation
-// counterpart to ChooseBroker.jsx. Parallel to the broker-broadcast flow, not a replacement:
-// the booking was already broadcast to brokers when it was created, so if this driver declines,
-// times out, or the client gives up waiting, onFallbackToBrokers() just switches the wizard over
-// to ChooseBroker — nothing needs to be re-created.
-export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers, onBackToTruckSelection }) {
+// The single-request negotiation card — shared by two different origins that both eventually
+// narrow down to exactly one driver_requests row to negotiate:
+//   variant="broker" (default) — ChooseBroker.jsx hands off here once a broker assigns a driver
+//     from their fleet. onFallbackToBrokers() (declined/gave up) returns to the broker offers
+//     list, since search_mode='broker' bookings have no other driver to fall back to.
+//   variant="findTruck" — FindTruckSearch.jsx hands off here once ANY of the fanned-out
+//     driver_requests (one per nearby driver, search_mode='truck') needs the client's attention.
+//     onFallbackToBrokers() (declined) returns to that waiting list — other drivers in the same
+//     fan-out may still respond, so this is "back to waiting", not "start over".
+export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers, variant = "broker" }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
@@ -151,7 +154,7 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
       );
     } catch (err) {
       toast.error(err?.message || "This request is no longer available.");
-      (onBackToTruckSelection || onFallbackToBrokers)();
+      onFallbackToBrokers();
     } finally {
       setActing(false);
     }
@@ -165,8 +168,8 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     try {
       const res = await api.patch(`/api/driver-requests/${request.id}/client-reject`, {}, token);
       if (!res?.success) throw new Error(res?.message || "Failed to decline");
-      toast.info(onBackToTruckSelection ? "Declined — let's find you another truck." : "Declined — showing broker offers instead");
-      (onBackToTruckSelection || onFallbackToBrokers)();
+      toast.info(variant === "findTruck" ? "Declined — checking on other nearby drivers." : "Declined — showing broker offers instead");
+      onFallbackToBrokers();
     } catch (err) {
       toast.error(err?.message || "Failed to decline");
     } finally {
@@ -362,15 +365,15 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
               </div>
               <h2 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">This driver isn't available</h2>
               <p className="text-sm text-neutral-400 mb-6">
-                {onBackToTruckSelection
-                  ? "Neither the driver nor their broker could take this one — let's find you another truck."
+                {variant === "findTruck"
+                  ? "This driver declined — other nearby drivers were notified too, let's see if any of them respond."
                   : "Brokers were already notified when you created this booking — let's see who's responded."}
               </p>
               <button
-                onClick={onBackToTruckSelection || onFallbackToBrokers}
+                onClick={onFallbackToBrokers}
                 className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
               >
-                {onBackToTruckSelection ? "Choose a Different Truck" : "See Broker Offers"}
+                {variant === "findTruck" ? "Back to Waiting" : "See Broker Offers"}
               </button>
             </>
           ) : isYourTurnToConfirm ? (
@@ -530,7 +533,7 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                 </>
               )}
 
-              {request.status !== "countered" && (
+              {variant === "broker" && request.status !== "countered" && (
                 <button onClick={onFallbackToBrokers} className="mt-5 text-xs text-neutral-400 hover:text-neutral-600 hover:underline transition-colors">
                   Not in a hurry? See broker offers instead →
                 </button>

@@ -550,6 +550,23 @@ export default function BookingDetail() {
                 )}
               </div>
             ) : null}
+            {/* Inter-city halting overage — computed and added to the total automatically once
+                a trip exceeds its free grace period (see gadidosti-backend's trip.controller.js
+                applyHaltingCharge). Purely informational here: haltingCharge is already folded
+                into booking.amount below, this line just explains where the extra came from. */}
+            {!!booking.haltingCharge && (
+              <div className="mb-3 bg-amber-50 rounded-lg px-2.5 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-700 flex items-center gap-1.5">
+                    <Clock3 className="w-3 h-3 flex-shrink-0" /> Halting charge ({booking.haltingHours}h overage)
+                  </span>
+                  <span className="text-xs font-semibold text-amber-700 tabular-nums whitespace-nowrap">
+                    +₹{Number(booking.haltingCharge).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <p className="text-[10px] text-amber-600 mt-1">Automatically added to your total below.</p>
+              </div>
+            )}
             <div className="flex items-center justify-between pt-3 border-t border-neutral-100">
               <span className="text-sm font-semibold text-neutral-800">Total</span>
               <span className="font-poppins font-bold text-lg text-primary tabular-nums">₹{booking.amount.toLocaleString("en-IN")}</span>
@@ -949,15 +966,23 @@ function InfoRow({ icon: Icon, label, value, sub }) {
 }
 
 // Direct-driver negotiation panel — shown above the broker OffersPanel below when this booking
-// has an in-flight driver negotiation. Two ways that can happen: the client requested a specific
-// truck themselves (POST /api/bookings/:id/request-truck, started from BookTruck.jsx's Step 3
-// truck pick — the id is stashed in localStorage the moment it's created, see utils.js's
-// getStoredDriverRequestId/setStoredDriverRequestId), or a broker assigned a driver on the
-// client's behalf (job.controller.js's assignDriver) — the client never created that one, so
-// there's no id in localStorage yet; GET /api/driver-requests/booking/:bookingId (below) is what
-// discovers it. Live updates arrive over the socket (useDriverRequestSocket) once either path has
-// a request; polling stays on as a fallback. Renders nothing once there's confirmed to be no
-// active request for this booking either way.
+// has an in-flight driver negotiation. Two ways that can happen: a "Find Truck" (search_mode=
+// 'truck') fan-out narrowed down to one driver the client is actively negotiating with
+// (BookTruck.jsx's FindTruckSearch/RequestDriver — the id is stashed in localStorage the moment
+// that happens, see utils.js's getStoredDriverRequestId/setStoredDriverRequestId), or a broker
+// assigned a driver on the client's behalf (job.controller.js's assignDriver) — the client never
+// created that one, so there's no id in localStorage yet; GET /api/driver-requests/booking/:bookingId
+// (below) is what discovers it. Live updates arrive over the socket (useDriverRequestSocket) once
+// either path has a request; polling stays on as a fallback. Renders nothing once there's
+// confirmed to be no active request for this booking either way.
+//
+// Known gap: GET /api/driver-requests/booking/:bookingId only ever returns one arbitrary row, so
+// for a 'truck' fan-out that's STILL mid-broadcast (every request 'pending', none promoted/
+// stored yet) and reached by navigating straight here rather than through the booking wizard,
+// this panel may show one arbitrary driver instead of the full fan-out — see
+// GET /api/bookings/:id/driver-requests (FindTruckSearch.jsx) for the fan-out-aware equivalent.
+// Once any one request needs the client's attention, RequestDriver.jsx stores its id and this
+// panel picks it up correctly from then on.
 function DriverRequestPanel({ booking, onAccepted }) {
   const toast = useToast();
   const token = getToken();
