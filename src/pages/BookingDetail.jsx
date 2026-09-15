@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Check, Download, Mail, XCircle, Truck, Copy, User, Building2,
-  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2, Zap,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2, Zap, CalendarClock,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
@@ -12,7 +12,7 @@ import TripChatFab from "../components/TripChatFab";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { adaptBooking, bookingRef, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId, shareInvoicePdf, shareTrackingLink } from "../utils";
+import { adaptBooking, bookingRef, formatDate, TIMELINE_STEPS, getStoredDriverRequestId, setStoredDriverRequestId, clearStoredDriverRequestId, shareInvoicePdf, shareTrackingLink } from "../utils";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 import { useTripStatusSocket } from "../hooks/useTripStatusSocket";
 
@@ -49,6 +49,10 @@ export default function BookingDetail() {
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
   const [sharingTracking, setSharingTracking] = useState(false);
+  // Driver reassignment history — empty for the overwhelming majority of bookings (a broker only
+  // reassigns mid-trip after an incident), so this is a separate, silent-on-failure fetch rather
+  // than something worth blocking/erroring the whole page load over.
+  const [reassignmentHistory, setReassignmentHistory] = useState([]);
 
   const loadBooking = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -66,6 +70,13 @@ export default function BookingDetail() {
 
   useEffect(() => {
     loadBooking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  useEffect(() => {
+    api.get(`/api/bookings/${id}/reassignment-history`, token)
+      .then((res) => { if (res?.success) setReassignmentHistory(res.data?.history || []); })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -321,6 +332,15 @@ export default function BookingDetail() {
                   <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.expectedDeliveryHours}h{booking.isExpress ? " (Express)" : ""}</p>
                 </div>
               )}
+              {/* Coarse, day-granularity delivery estimate — fixed at booking-creation time,
+                  a sibling field to expectedDeliveryHours above (that one's hour-precision,
+                  used for the SLA delay charge), not derived from it. */}
+              {booking.estimatedDeliveryDate && (
+                <div className="bg-neutral-50 rounded-lg py-2 px-3">
+                  <p className="text-[10px] text-neutral-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Estimated Delivery</p>
+                  <p className="text-sm font-semibold text-neutral-700 mt-0.5">{formatDate(booking.estimatedDeliveryDate)}</p>
+                </div>
+              )}
             </div>
 
             {/* Horizontal Status Timeline */}
@@ -417,6 +437,30 @@ export default function BookingDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Driver reassignment history — quiet, collapsed by default (edge-case info most
+                clients will never see); hidden entirely when empty rather than showing a "No
+                reassignments" line. Newest first. */}
+            {reassignmentHistory.length > 0 && (
+              <details className="bg-neutral-50 rounded-lg p-3 mb-4">
+                <summary className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer select-none flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3" /> Driver Changed ({reassignmentHistory.length})
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {[...reassignmentHistory]
+                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                    .map((entry) => (
+                      <div key={entry.id} className="text-xs text-neutral-500">
+                        <p>
+                          Reassigned from <span className="font-medium text-neutral-700">{entry.fromDriverName || "—"}</span> to{" "}
+                          <span className="font-medium text-neutral-700">{entry.toDriverName || "—"}</span> on {formatDate(entry.createdAt)}
+                        </p>
+                        {entry.reason && <p className="text-neutral-400 mt-0.5">Reason: {entry.reason}</p>}
+                      </div>
+                    ))}
+                </div>
+              </details>
+            )}
 
             {/* Proof of Delivery */}
             {booking.podUrl && (

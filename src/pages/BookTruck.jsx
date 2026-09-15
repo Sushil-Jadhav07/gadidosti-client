@@ -16,7 +16,7 @@ import FindTruckSearch from "./FindTruckSearch";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import {
-  bookingRef, haversineDistanceKm,
+  bookingRef, haversineDistanceKm, formatDate,
   getStoredBookingWizardState, setStoredBookingWizardState, clearStoredBookingWizardState,
 } from "../utils";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
@@ -983,6 +983,14 @@ export default function BookTruck() {
                   <p className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1">
                     {priceBreakdown.isExpress && <Zap className="w-3 h-3 text-primary flex-shrink-0" />}
                     Expected delivery in ~{priceBreakdown.expectedDeliveryHours}h{priceBreakdown.isExpress ? " (Express)" : ""}
+                  </p>
+                )}
+                {/* Coarse, day-granularity estimate — independently computed from
+                    expectedDeliveryHours above (that one's hour-precision, used for the
+                    delay-charge SLA), always present once a quote has a distance. */}
+                {priceBreakdown.estimatedDeliveryDate && (
+                  <p className="text-[11px] text-neutral-400 mt-0.5">
+                    Expected by <span className="font-medium text-neutral-600">{formatDate(priceBreakdown.estimatedDeliveryDate)}</span>
                   </p>
                 )}
 
@@ -1994,6 +2002,13 @@ export default function BookTruck() {
                             {priceBreakdown.isExpress && <Zap className="w-3 h-3 text-primary flex-shrink-0" />}
                             Expected delivery within <span className="font-semibold text-neutral-600">{priceBreakdown.expectedDeliveryHours}h</span>
                             {priceBreakdown.isExpress ? " (Express)" : ""}
+                          </p>
+                        )}
+                        {/* Coarse, day-granularity estimate — a sibling field to
+                            expectedDeliveryHours above, not derived from it. */}
+                        {priceBreakdown.estimatedDeliveryDate && (
+                          <p className="text-[11px] text-neutral-400 mt-1">
+                            Estimated delivery by <span className="font-semibold text-neutral-600">{formatDate(priceBreakdown.estimatedDeliveryDate)}</span>
                           </p>
                         )}
 
