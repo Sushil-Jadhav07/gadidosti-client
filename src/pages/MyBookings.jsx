@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package, AlertTriangle, RefreshCw, Download, Plus, Route as RouteIcon, Eye, ChevronLeft, ChevronRight, Search, ClipboardList } from "lucide-react";
+import { Package, AlertTriangle, RefreshCw, Download, Plus, Route as RouteIcon, Eye, ChevronLeft, ChevronRight, Search, ClipboardList, Zap } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import { api, getToken } from "../services/api";
 import { adaptBooking, bookingRef } from "../utils";
@@ -254,7 +254,14 @@ export default function MyBookings() {
                       <span className="text-sm text-neutral-600">{booking.truckType}</span>
                     </td>
                     <td className="px-5 py-4">
-                      <StatusBadge status={booking.status} />
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={booking.status} />
+                        {booking.isExpress && (
+                          <span title="Express Delivery" className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                            <Zap className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-4">
                       <button
@@ -322,7 +329,14 @@ export default function MyBookings() {
                       {booking.pickup} → {booking.drop}
                     </p>
                   </div>
-                  <StatusBadge status={booking.status} />
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {booking.isExpress && (
+                      <span title="Express Delivery" className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                        <Zap className="w-3 h-3" />
+                      </span>
+                    )}
+                    <StatusBadge status={booking.status} />
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-neutral-50">

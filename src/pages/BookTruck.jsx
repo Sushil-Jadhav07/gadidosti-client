@@ -60,6 +60,10 @@ const INITIAL_FORM = {
   materialType: "",
   notes: "",
   truckType: null,
+  // Express Delivery — intra-city only (see the toggle in Step 3). Force-reset to false
+  // whenever transportType isn't "intra" (see the effect right after transportType is
+  // derived below), since sending is_express: true alongside transport_type: "inter" 422s.
+  isExpress: false,
   // Book Now / Book Later ("is_scheduled") — see the toggle at the top of Step 1.
   bookingMode: "now",
   scheduledDateTime: "",
@@ -369,6 +373,15 @@ export default function BookTruck() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.pickup, form.drop, form.pickupCity, form.dropCity]);
 
+  // Express Delivery is intra-city only — the backend 422s a booking/quote request that sends
+  // is_express: true alongside transport_type: "inter". Rather than just hiding the toggle for
+  // inter-city (Step 3 below), this also clears any express selection made before the addresses
+  // resolved to different cities, so a stale `true` can never linger into an inter-city request.
+  useEffect(() => {
+    if (form.transportType !== "intra" && form.isExpress) updateForm("isExpress", false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.transportType]);
+
   // Reverse-geocodes the browser's GPS position into a street address for the Pickup field —
   // uses google.maps.Geocoder (the Geocoding API, a separate Google product from Places, not
   // part of the AutocompleteService/PlacesService deprecation PlacesAutocompleteInput works
@@ -643,6 +656,11 @@ export default function BookTruck() {
           ...(form.pickupLat != null && form.pickupLng != null
             ? { pickup_lat: form.pickupLat, pickup_lng: form.pickupLng }
             : {}),
+          // Only meaningful for an intra-city trip (the backend 422s is_express: true on an
+          // inter-city one) — the reset effect above already guarantees form.isExpress is false
+          // whenever transportType isn't "intra", but this stays explicit rather than trusting
+          // that alone.
+          is_express: form.transportType === "intra" ? form.isExpress : false,
         }, token);
         if (!pricingRes?.success) throw new Error(pricingRes?.message || "Pricing unavailable");
         if (isCurrent()) {
@@ -665,7 +683,7 @@ export default function BookTruck() {
       clearTimeout(timer);
     };
   }, [
-    form.truckType, form.pickup, form.drop, form.transportType,
+    form.truckType, form.pickup, form.drop, form.transportType, form.isExpress,
     form.pickupLat, form.pickupLng, form.dropLat, form.dropLng,
     JSON.stringify(form.loadingLocations), JSON.stringify(form.unloadingLocations),
     mapsLoaded, token, quoteRetryToken,
@@ -720,6 +738,8 @@ export default function BookTruck() {
         drop_lng: form.dropLng,
         transport_type: form.transportType,
         city: form.transportType === "intra" ? form.city : undefined,
+        // Same intra-city-only rule as the quote call above — 422s if sent true for "inter".
+        is_express: form.transportType === "intra" ? form.isExpress : false,
         truck_type: selectedTruck?.name,
         truck_category: form.truckType,
         weight: form.weight,
@@ -958,6 +978,23 @@ export default function BookTruck() {
                 </p>
                 {!!priceBreakdown.distance && (
                   <p className="text-[11px] text-neutral-300 mt-0.5 tabular-nums">~{priceBreakdown.distance} km</p>
+                )}
+                {priceBreakdown.expectedDeliveryHours != null && (
+                  <p className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1">
+                    {priceBreakdown.isExpress && <Zap className="w-3 h-3 text-primary flex-shrink-0" />}
+                    Expected delivery in ~{priceBreakdown.expectedDeliveryHours}h{priceBreakdown.isExpress ? " (Express)" : ""}
+                  </p>
+                )}
+
+                {!!priceBreakdown.expressSurcharge && (
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-neutral-100">
+                    <span className="text-xs text-neutral-400 flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-primary" /> Express surcharge
+                    </span>
+                    <span className="text-xs font-medium text-primary">
+                      +₹{Number(priceBreakdown.expressSurcharge).toLocaleString("en-IN")}
+                    </span>
+                  </div>
                 )}
 
                 {priceBreakdown.trafficMultiplier > 1 && (
@@ -1556,6 +1593,56 @@ export default function BookTruck() {
                     ))}
                   </div>
 
+                  {/* Express Delivery — intra-city only (see is_express in the price-quote effect
+                      and handleConfirm above; sending it for an Inter-City trip 422s), so this
+                      is hidden entirely rather than just disabled once the trip is Inter-City.
+                      The surcharge/expected-delivery figures only ever come from a live quote —
+                      never hardcoded — so they only appear once the toggle is on and a fresh
+                      quote (with is_express: true) has actually come back. */}
+                  {form.transportType === "intra" && (
+                    <div className={`flex items-start justify-between gap-3 border rounded-xl p-4 mb-6 transition-colors ${
+                      form.isExpress ? "border-primary/30 bg-primary-50" : "border-neutral-100"
+                    }`}>
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          form.isExpress ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"
+                        }`}>
+                          <Zap className="w-4.5 h-4.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-poppins font-semibold text-sm text-neutral-800">Express Delivery</p>
+                          <p className="text-xs text-neutral-400 mt-0.5">
+                            Get a tighter delivery deadline, for an added surcharge on top of the fare below.
+                          </p>
+                          {form.isExpress && (
+                            loadingQuote ? (
+                              <p className="text-[11px] text-neutral-400 mt-1.5">Calculating surcharge...</p>
+                            ) : priceBreakdown?.isExpress ? (
+                              <div className="mt-1.5">
+                                <p className="text-[11px] font-semibold text-primary">
+                                  +₹{Number(priceBreakdown.expressSurcharge).toLocaleString("en-IN")} surcharge
+                                  {priceBreakdown.expectedDeliveryHours != null && ` · expected delivery in ~${priceBreakdown.expectedDeliveryHours}h`}
+                                </p>
+                                {priceBreakdown.expressInsuranceIncluded && (
+                                  <p className="text-[11px] text-neutral-400 mt-0.5">Includes transit insurance</p>
+                                )}
+                              </div>
+                            ) : null
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={form.isExpress}
+                        onClick={() => updateForm("isExpress", !form.isExpress)}
+                        className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors ${form.isExpress ? "bg-primary" : "bg-neutral-200"}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.isExpress ? "translate-x-5" : ""}`} />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Find Truck (fan-out broadcast to every nearby driver) vs Search for Broker
                       (send to exactly one broker) — mutually exclusive: picking one clears the
                       other's own fields (radius / selected broker) so there's no stale leftover
@@ -1885,6 +1972,12 @@ export default function BookTruck() {
                               <span className="text-xs font-medium text-amber-600 tabular-nums">+₹{Number(priceBreakdown.supplySurcharge).toLocaleString("en-IN")}</span>
                             </div>
                           )}
+                          {!!priceBreakdown.expressSurcharge && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400 flex items-center gap-1"><Zap className="w-3 h-3 text-primary" /> Express Surcharge</span>
+                              <span className="text-xs font-medium text-primary tabular-nums">+₹{Number(priceBreakdown.expressSurcharge).toLocaleString("en-IN")}</span>
+                            </div>
+                          )}
                           {priceBreakdown.platformFee != null && (
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-neutral-400">Platform Fee</span>
@@ -1896,6 +1989,13 @@ export default function BookTruck() {
                           <span className="text-sm font-semibold text-neutral-800">Total Estimated</span>
                           <span className="font-poppins font-bold text-lg text-primary tabular-nums">₹{Number(priceBreakdown.total).toLocaleString("en-IN")}</span>
                         </div>
+                        {priceBreakdown.expectedDeliveryHours != null && (
+                          <p className="text-[11px] text-neutral-400 mt-2 flex items-center gap-1">
+                            {priceBreakdown.isExpress && <Zap className="w-3 h-3 text-primary flex-shrink-0" />}
+                            Expected delivery within <span className="font-semibold text-neutral-600">{priceBreakdown.expectedDeliveryHours}h</span>
+                            {priceBreakdown.isExpress ? " (Express)" : ""}
+                          </p>
+                        )}
 
                         <div className="mt-4 pt-4 border-t border-neutral-100 flex items-center gap-3">
                           <span className="w-9 h-9 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">

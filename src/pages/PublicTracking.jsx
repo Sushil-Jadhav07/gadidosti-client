@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { MapPin, Clock, Check, AlertTriangle, Truck, Hash } from "lucide-react";
+import { MapPin, Clock, Check, AlertTriangle, Truck, Hash, Zap } from "lucide-react";
 import MapView from "../components/MapView";
 import StatusBadge from "../components/StatusBadge";
 import { api } from "../services/api";
@@ -166,7 +166,14 @@ export default function PublicTracking() {
             <p className="flex items-center gap-1.5 text-xs text-neutral-400 font-medium">
               <Hash className="w-3.5 h-3.5" /> {data.bookingNumber || "-"}
             </p>
-            <StatusBadge status={data.status} />
+            <div className="flex items-center gap-1.5">
+              {data.isExpress && (
+                <span title="Express Delivery" className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                  <Zap className="w-3.5 h-3.5" />
+                </span>
+              )}
+              <StatusBadge status={data.status} />
+            </div>
           </div>
 
           <div className="flex gap-3">

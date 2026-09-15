@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star, Link2 } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star, Link2, Zap } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
@@ -378,6 +378,11 @@ export default function TrackShipment() {
                   >
                     <Link2 className="w-3.5 h-3.5" />
                   </button>
+                  {activeBooking.isExpress && (
+                    <span title="Express Delivery" className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                      <Zap className="w-3.5 h-3.5" />
+                    </span>
+                  )}
                   <StatusBadge status={activeBooking.status} />
                 </div>
               </div>

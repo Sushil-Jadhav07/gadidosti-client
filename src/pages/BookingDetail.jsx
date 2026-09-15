@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Check, Download, Mail, XCircle, Truck, Copy, User, Building2,
-  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2,
+  Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2, Zap,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
@@ -291,12 +291,19 @@ export default function BookingDetail() {
                   </div>
                 </div>
               </div>
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary whitespace-nowrap flex-shrink-0">
-                {booking.status}
-              </span>
+              <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                {booking.isExpress && (
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-primary text-white whitespace-nowrap flex items-center gap-1">
+                    <Zap className="w-3 h-3" /> Express
+                  </span>
+                )}
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary whitespace-nowrap">
+                  {booking.status}
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
               <div className="bg-neutral-50 rounded-lg py-2 px-3">
                 <p className="text-[10px] text-neutral-400 flex items-center gap-1"><Ruler className="w-3 h-3" /> Distance</p>
                 <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.distance ? `${booking.distance} km` : "—"}</p>
@@ -305,6 +312,15 @@ export default function BookingDetail() {
                 <p className="text-[10px] text-neutral-400 flex items-center gap-1"><Building2 className="w-3 h-3" /> Transport Type</p>
                 <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.transportType === "intra" ? "Intra-City" : "Inter-City"}</p>
               </div>
+              {/* Expected delivery window — fixed at trip-creation time (see slaOverageCharge
+                  below for what happens when a trip actually runs over it), so this stays "—"
+                  until a trip actually exists for this booking. */}
+              {booking.expectedDeliveryHours != null && (
+                <div className="bg-neutral-50 rounded-lg py-2 px-3">
+                  <p className="text-[10px] text-neutral-400 flex items-center gap-1"><Clock3 className="w-3 h-3" /> Expected Delivery</p>
+                  <p className="text-sm font-semibold text-neutral-700 mt-0.5">{booking.expectedDeliveryHours}h{booking.isExpress ? " (Express)" : ""}</p>
+                </div>
+              )}
             </div>
 
             {/* Horizontal Status Timeline */}
@@ -595,6 +611,24 @@ export default function BookingDetail() {
                   </span>
                   <span className="text-xs font-semibold text-amber-700 tabular-nums whitespace-nowrap">
                     +₹{Number(booking.haltingCharge).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <p className="text-[10px] text-amber-600 mt-1">Automatically added to your total below.</p>
+              </div>
+            )}
+            {/* Delivery SLA overage — every trip has a distance-tiered expected delivery time
+                (tightened further when Express Delivery is on); running over it adds this charge
+                automatically, same mechanism as the halting overage above but tracking the whole
+                journey's time instead of time spent stopped. Also purely informational —
+                slaOverageCharge is already folded into booking.amount below. */}
+            {!!booking.slaOverageCharge && (
+              <div className="mb-3 bg-amber-50 rounded-lg px-2.5 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-700 flex items-center gap-1.5">
+                    <Clock3 className="w-3 h-3 flex-shrink-0" /> Delivery delay charge ({booking.slaOverageHours}h over SLA)
+                  </span>
+                  <span className="text-xs font-semibold text-amber-700 tabular-nums whitespace-nowrap">
+                    +₹{Number(booking.slaOverageCharge).toLocaleString("en-IN")}
                   </span>
                 </div>
                 <p className="text-[10px] text-amber-600 mt-1">Automatically added to your total below.</p>
