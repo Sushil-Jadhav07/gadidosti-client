@@ -7,6 +7,7 @@ import {
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
 import MapView from "../components/MapView";
+import HaltingTimer from "../components/HaltingTimer";
 import ChatWindow from "../components/ChatWindow";
 import TripChatFab from "../components/TripChatFab";
 import { useToast } from "../context/ToastContext";
@@ -643,6 +644,11 @@ export default function BookingDetail() {
                 )}
               </div>
             ) : null}
+            {/* Live free-halting-window countdown/overage — the running counterpart to the
+                fixed haltingCharge block just below, shown only while the trip's still in
+                progress (showFinal=false since that final result is already rendered right
+                here once the trip's delivered). See HaltingTimer.jsx. */}
+            <HaltingTimer booking={booking} showFinal={false} className="mb-3" />
             {/* Inter-city halting overage — computed and added to the total automatically once
                 a trip exceeds its free grace period (see gadidosti-backend's trip.controller.js
                 applyHaltingCharge). Purely informational here: haltingCharge is already folded

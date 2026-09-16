@@ -6,6 +6,7 @@ import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
 import TripChatFab from "../components/TripChatFab";
 import MapView from "../components/MapView";
+import HaltingTimer from "../components/HaltingTimer";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
@@ -360,6 +361,10 @@ export default function TrackShipment() {
               <p className="text-sm text-neutral-600">Pickup verified with your code.</p>
             </div>
           )}
+          {/* Free-halting-window countdown / overage / final-charge readout — see
+              HaltingTimer.jsx. Renders nothing at all for a non-eligible booking, a trip that
+              hasn't started, or a delivered trip with no overage charge. */}
+          <HaltingTimer booking={activeBooking} className="mb-5" />
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 md:gap-6">
           {/* Left Panel */}
           <div className="lg:col-span-2 space-y-4 md:space-y-5">
