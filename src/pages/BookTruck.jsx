@@ -27,6 +27,10 @@ import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps"
 // to omit it (the new UI always sends search_radius_km explicitly in "truck" mode).
 const DEFAULT_SEARCH_RADIUS_KM = 15;
 
+// GET /api/vehicles/trucks/nearby's own comment: movement isn't pushed live (DB-only writes,
+// no socket) — re-poll periodically while Step 3's map is actually showing these trucks.
+const NEARBY_TRUCKS_POLL_MS = 8000;
+
 // Last-resort fallback if /api/config/vehicle-types is unreachable — these prices are only
 // ever shown when the live, admin-configured pricing couldn't be fetched at all (see
 // configError below), never used to override a real response.
@@ -288,6 +292,8 @@ export default function BookTruck() {
           bookingNumber: bookingRef(booking),
           askingPrice: booking.amount,
           pickup: booking.pickup,
+          pickupLat: booking.pickupLat,
+          pickupLng: booking.pickupLng,
           drop: booking.drop,
           isScheduled: !!booking.isScheduled,
           scheduledDate: booking.date || null,
@@ -356,6 +362,38 @@ export default function BookTruck() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.searchMode]);
+
+  // Trucks actually visible on Step 3's map while "Find Truck" is selected — so the radius
+  // slider means something concrete instead of just a number. Same endpoint the manual
+  // truck-pick flow already uses; that endpoint's own comment says movement isn't pushed live
+  // (DB-only writes, no socket), so this re-polls every NEARBY_TRUCKS_POLL_MS while the client
+  // is actually looking at this step, same as it recommends.
+  const [nearbyTrucks, setNearbyTrucks] = useState([]);
+  useEffect(() => {
+    if (step !== 3 || form.searchMode !== "truck" || form.pickupLat == null || form.pickupLng == null) {
+      setNearbyTrucks([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const fetchNearby = async () => {
+      try {
+        const params = new URLSearchParams({
+          pickup_lat: form.pickupLat,
+          pickup_lng: form.pickupLng,
+          radius_km: String(form.searchRadiusKm),
+        });
+        const res = await api.get(`/api/vehicles/trucks/nearby?${params.toString()}`, token);
+        if (!cancelled && res?.success) setNearbyTrucks(res.data?.trucks || []);
+      } catch {
+        // Silent — this is a "nice to see" map layer, not booking-critical; a failed poll just
+        // leaves the last-known truck positions on screen until the next one succeeds.
+      }
+    };
+    fetchNearby();
+    const interval = setInterval(fetchNearby, NEARBY_TRUCKS_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, form.searchMode, hasPickupCoords, form.pickupLat, form.pickupLng, form.searchRadiusKm]);
 
   // Transport type is no longer a manual choice — it's derived from whichever cities the
   // pickup/drop addresses resolve to: same city → Intra-City, different cities → Inter-City.
@@ -806,6 +844,8 @@ export default function BookTruck() {
         bookingNumber: bookingRef(booking),
         askingPrice: finalAmount,
         pickup: form.pickup,
+        pickupLat: booking?.pickupLat ?? form.pickupLat,
+        pickupLng: booking?.pickupLng ?? form.pickupLng,
         drop: form.drop,
         isScheduled: !!booking?.isScheduled,
         scheduledDate: booking?.date || (isScheduled ? form.scheduledDateTime : null),
@@ -931,7 +971,26 @@ export default function BookTruck() {
   ] : [
     ...(hasPickupCoords && !hasDropCoords ? [{ id: "pickup-only", position: { lat: form.pickupLat, lng: form.pickupLng }, color: "blue", title: form.pickup }] : []),
     ...(hasDropCoords && !hasPickupCoords ? [{ id: "drop-only", position: { lat: form.dropLat, lng: form.dropLng }, color: "green", title: form.drop }] : []),
+    // Step 3's "Find Truck" mode — every truck currently within the search radius, same
+    // rotating vehicle glyph as everywhere else a truck shows up on a map (MapView's own
+    // truckCategory flag, backed by lib/truckIcon.js).
+    ...(step === 3 && form.searchMode === "truck" ? nearbyTrucks.map((t) => ({
+      id: `nearby-truck-${t.id}`,
+      position: { lat: t.currentLat, lng: t.currentLng },
+      truckCategory: t.category || true,
+      heading: t.heading,
+      title: `${t.registration}${t.distanceKm != null ? ` · ${t.distanceKm.toFixed(1)} km away` : ""}`,
+    })) : []),
   ];
+
+  // The search-radius circle Step 3's "Find Truck" mode actually broadcasts to — centered on
+  // pickup, radius straight off the slider. Gives the number on the slider a visible meaning
+  // instead of just a label.
+  const summaryMapCircles = step === 3 && form.searchMode === "truck" && hasPickupCoords ? [{
+    id: "search-radius",
+    center: { lat: form.pickupLat, lng: form.pickupLng },
+    radiusMeters: form.searchRadiusKm * 1000,
+  }] : [];
 
   // Defined once, rendered as its own sticky right-hand column on every step — a full-bleed
   // map with the summary as a floating overlay card at the bottom, not a separate section
@@ -942,6 +1001,7 @@ export default function BookTruck() {
       <MapView
         routes={summaryMapRoutes}
         markers={summaryMapMarkers}
+        circles={summaryMapCircles}
         height="100%"
         className="absolute inset-0"
         {...(step === 1 ? { onMapClick: handleMapClick, myLocation, suppressRouteMarkers: true } : {})}
@@ -1098,6 +1158,8 @@ export default function BookTruck() {
             bookingNumber={createdBooking.bookingNumber}
             askingPrice={createdBooking.askingPrice}
             pickup={createdBooking.pickup}
+            pickupLat={createdBooking.pickupLat}
+            pickupLng={createdBooking.pickupLng}
             drop={createdBooking.drop}
             searchRadiusKm={createdBooking.searchRadiusKm}
             onBack={() => setStep(4)}

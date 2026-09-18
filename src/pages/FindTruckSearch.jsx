@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Radar, Clock3, MapPin, ClipboardList, Ruler } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import RequestDriver from "./RequestDriver";
+import MapView from "../components/MapView";
 import { api, getToken } from "../services/api";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
@@ -25,7 +26,7 @@ const NEEDS_ACTION_RANK = 2;
 // exact same single-target accept/negotiate/mutual-confirm/payment flow the broker-assigned
 // path already uses — so declining that one driver returns here to keep waiting on the rest,
 // rather than ending the search.
-export default function FindTruckSearch({ bookingId, bookingNumber, askingPrice, pickup, drop, searchRadiusKm, onBack }) {
+export default function FindTruckSearch({ bookingId, bookingNumber, askingPrice, pickup, pickupLat, pickupLng, drop, searchRadiusKm, onBack }) {
   const [driverRequest, setDriverRequest] = useState(null);
 
   if (driverRequest) {
@@ -49,6 +50,8 @@ export default function FindTruckSearch({ bookingId, bookingNumber, askingPrice,
       bookingId={bookingId}
       askingPrice={askingPrice}
       pickup={pickup}
+      pickupLat={pickupLat}
+      pickupLng={pickupLng}
       drop={drop}
       searchRadiusKm={searchRadiusKm}
       onBack={onBack}
@@ -57,7 +60,7 @@ export default function FindTruckSearch({ bookingId, bookingNumber, askingPrice,
   );
 }
 
-function DriverFanOutWaiting({ bookingId, askingPrice, pickup, drop, searchRadiusKm, onBack, onPromote }) {
+function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickupLng, drop, searchRadiusKm, onBack, onPromote }) {
   const token = getToken();
 
   const [requests, setRequests] = useState([]);
@@ -110,6 +113,26 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, drop, searchRadiu
   const totalCount = requests.length;
   const declinedCount = requests.filter((r) => r.status === "declined").length;
   const allDeclined = totalCount > 0 && declinedCount === totalCount;
+
+  const hasPickupCoords = pickupLat != null && pickupLng != null;
+  // One marker per still-live driver who's actually reported a GPS fix — same rotating vehicle
+  // glyph used everywhere else a truck shows up on a map. Declined drivers drop off the map the
+  // same way they drop off the "Notified N drivers" count above.
+  const driverMarkers = useMemo(() => requests
+    .filter((r) => r.status !== "declined" && r.driverLat != null && r.driverLng != null)
+    .map((r) => ({
+      id: `driver-${r.id}`,
+      position: { lat: r.driverLat, lng: r.driverLng },
+      truckCategory: r.truckCategory || true,
+      heading: r.driverHeading,
+      title: `${r.driverName || "Driver"}${r.truckReg ? ` · ${r.truckReg}` : ""} — ${r.status}`,
+    })), [requests]);
+  const searchMapMarkers = hasPickupCoords
+    ? [{ id: "pickup", position: { lat: pickupLat, lng: pickupLng }, color: "blue", title: pickup || "Pickup" }, ...driverMarkers]
+    : driverMarkers;
+  const searchMapCircles = hasPickupCoords && searchRadiusKm
+    ? [{ id: "search-radius", center: { lat: pickupLat, lng: pickupLng }, radiusMeters: searchRadiusKm * 1000 }]
+    : [];
 
   return (
     <div>
@@ -181,7 +204,9 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, drop, searchRadiu
             </div>
           </div>
 
-          {/* Right: fan-out status. */}
+          {/* Right: fan-out status — a live map (pickup + search radius + any responding
+              driver's own position) sits under the status banner once we're actually
+              searching, so "notified N drivers" has somewhere to show who. */}
           <div className="p-6 md:p-8 text-center">
             {loading ? (
               <div className="flex flex-col items-center py-10">
@@ -215,9 +240,33 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, drop, searchRadiu
                 <p className="text-sm text-neutral-400 mb-4">
                   Waiting for a response — this screen updates automatically the moment someone accepts or counters.
                 </p>
-                <p className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary">
+                <p className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary mb-5">
                   <Clock3 className="w-3 h-3" /> First to accept gets the job
                 </p>
+
+                {(searchMapMarkers.length > 0 || searchMapCircles.length > 0) && (
+                  <div className="relative h-64 rounded-xl overflow-hidden border border-neutral-100 text-left">
+                    <MapView markers={searchMapMarkers} circles={searchMapCircles} height="100%" className="absolute inset-0" />
+                    {driverMarkers.length === 0 && (
+                      <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm">
+                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse" /> Searching nearby...
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {driverMarkers.length > 0 && (
+                  <div className="mt-3 space-y-1.5 text-left">
+                    {requests
+                      .filter((r) => r.status !== "declined")
+                      .map((r) => (
+                        <div key={r.id} className="flex items-center justify-between gap-2 bg-neutral-50 rounded-lg px-3 py-2 text-xs">
+                          <span className="font-medium text-neutral-700 truncate">{r.driverName || "Driver"}{r.truckReg ? ` · ${r.truckReg}` : ""}</span>
+                          <span className="text-neutral-400 flex-shrink-0 capitalize">{r.status.replace(/_/g, " ")}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMap, useJsApiLoader, Marker, DirectionsService, DirectionsRenderer } from "@react-google-maps/api";
+import { GoogleMap, useJsApiLoader, Marker, Circle, DirectionsService, DirectionsRenderer } from "@react-google-maps/api";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 import { buildTruckIcon } from "../lib/truckIcon";
 
@@ -187,6 +187,10 @@ function RouteRenderer({ route, onResolved }) {
 // elsewhere in the app (e.g. TrackShipment's own "Loading your shipments..." state).
 export default function MapView({
   routes = [], markers = [], height = "400px", className = "", zoom,
+  // Plain radius circles — e.g. Find Truck's "we notify every driver within N km" search area.
+  // Each entry: { id, center: {lat, lng}, radiusMeters, color }. Purely decorative (no click
+  // handling) — just a visual bound, same idea as Uber/Ola's pickup-radius indicator.
+  circles = [],
   // Renders a Google-Maps-style blue dot at this {lat, lng} — the device's own live position,
   // kept separate from `markers` so it never gets swept into bounds-fitting or treated as a
   // route stop. Optional; omit entirely on screens that don't track the viewer's own location.
@@ -247,18 +251,30 @@ export default function MapView({
   const onLoad = useCallback((instance) => setMap(instance), []);
   const onUnmount = useCallback(() => setMap(null), []);
 
+  // Circles (radius search areas) need to factor into the fit too, or a big one gets clipped —
+  // approximated as a lat/lng bounding box around each circle rather than a precise geodesic
+  // calc, which is more precision than "don't clip the circle" actually needs.
+  const circlesKey = circles.map((c) => `${c.id}:${c.center?.lat},${c.center?.lng},${c.radiusMeters}`).join("|");
   useEffect(() => {
-    if (!map || !isLoaded || !window.google || !allMarkers.length) return;
-    if (allMarkers.length === 1) {
+    if (!map || !isLoaded || !window.google) return;
+    if (!allMarkers.length && !circles.length) return;
+    if (allMarkers.length === 1 && !circles.length) {
       map.setCenter(allMarkers[0].position);
       if (!zoom) map.setZoom(13);
       return;
     }
     const bounds = new window.google.maps.LatLngBounds();
     allMarkers.forEach((m) => { if (m.position) bounds.extend(m.position); });
-    map.fitBounds(bounds, 56);
+    circles.forEach((c) => {
+      if (!c.center || !c.radiusMeters) return;
+      const latDelta = c.radiusMeters / 111320;
+      const lngDelta = c.radiusMeters / (111320 * Math.cos((c.center.lat * Math.PI) / 180) || 1);
+      bounds.extend({ lat: c.center.lat + latDelta, lng: c.center.lng + lngDelta });
+      bounds.extend({ lat: c.center.lat - latDelta, lng: c.center.lng - lngDelta });
+    });
+    if (!bounds.isEmpty()) map.fitBounds(bounds, 56);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, isLoaded, pointsKey]);
+  }, [map, isLoaded, pointsKey, circlesKey]);
 
   // Both hooks below must stay above the loadError/!isLoaded early returns further down — a
   // hook called only on some renders (e.g. once isLoaded flips true partway through a session)
@@ -305,6 +321,21 @@ export default function MapView({
     >
       {routes.map((route) => (
         <RouteRenderer key={route.id} route={route} onResolved={handleResolved} />
+      ))}
+      {circles.map((c) => (
+        <Circle
+          key={c.id}
+          center={c.center}
+          radius={c.radiusMeters}
+          options={{
+            strokeColor: c.color || "#166534",
+            strokeOpacity: 0.5,
+            strokeWeight: 1.5,
+            fillColor: c.color || "#166534",
+            fillOpacity: 0.08,
+            clickable: false,
+          }}
+        />
       ))}
       {allMarkers.map((m) => (
         <Marker
