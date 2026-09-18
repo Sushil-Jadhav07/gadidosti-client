@@ -204,6 +204,13 @@ export default function MapView({
   // pickup/drop markers via `markers` instead (BookTruck's Step 1) and would otherwise end up
   // with two overlapping pins at the same spot, one draggable and one not.
   suppressRouteMarkers = false,
+  // Pins the viewport to an exact center+zoom and disables every pan/zoom/scroll/double-click
+  // gesture — for a "searching" map (Find Truck's radar-ping screen) that must show one fixed
+  // point and never drift, instead of the default auto-fit-to-markers/bounds behavior below
+  // (which re-centers/re-zooms on every poll and was the source of the map unexpectedly zooming
+  // out over time as marker/circle bounds shifted slightly between polls).
+  lockedCenter = null,
+  lockedZoom,
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: GOOGLE_MAPS_SCRIPT_ID,
@@ -235,9 +242,20 @@ export default function MapView({
     [routes, resolvedEndpoints]
   );
 
+  // A marker/circle with a missing or non-numeric lat/lng (e.g. a truck whose location hasn't
+  // resolved yet) crashes the whole map if handed to the Maps SDK as-is — setPosition and
+  // bounds.extend both throw synchronously on anything that isn't a real number. Drop it here,
+  // once, rather than trusting every caller to pre-filter its own marker/circle list.
+  const isFiniteNum = (n) => typeof n === "number" && Number.isFinite(n);
+  const isValidPoint = (p) => !!p && isFiniteNum(p.lat) && isFiniteNum(p.lng);
+
   const allMarkers = useMemo(
-    () => [...(suppressRouteMarkers ? [] : routeMarkers), ...markers],
+    () => [...(suppressRouteMarkers ? [] : routeMarkers), ...markers].filter((m) => isValidPoint(m.position)),
     [routeMarkers, markers, suppressRouteMarkers]
+  );
+  const validCircles = useMemo(
+    () => circles.filter((c) => isValidPoint(c.center) && isFiniteNum(c.radiusMeters) && c.radiusMeters > 0),
+    [circles]
   );
   const pointsKey = allMarkers.map((m) => `${m.position?.lat},${m.position?.lng}`).join("|");
   // Bounds-fitting and the map's center below intentionally use each marker's real (target)
@@ -251,21 +269,45 @@ export default function MapView({
   const onLoad = useCallback((instance) => setMap(instance), []);
   const onUnmount = useCallback(() => setMap(null), []);
 
+  // A map that first mounts while its own container is still 0×0 (or briefly the wrong size) —
+  // which a CSS flex/grid chain resolving its final height a tick after mount can absolutely
+  // cause — renders forever after as a flat fill color with no tile imagery at all, even once
+  // the container's real size lands, unless the SDK is explicitly told to re-measure. This is
+  // exactly the "gray map" bug this component started hitting once FindTruckSearch.jsx switched
+  // to a flex-stretched full-height layout (its map sizes off `items-stretch`, not a fixed
+  // height known up front, unlike every other screen's map). Re-triggering 'resize' (and
+  // recentering, since a resize can silently shift the viewport) whenever the container's
+  // actual pixel size changes fixes it for good, not just once at mount.
+  useEffect(() => {
+    if (!map || !window.google?.maps) return undefined;
+    const container = map.getDiv?.();
+    if (!container || typeof ResizeObserver === "undefined") return undefined;
+    const recenter = lockedCenter || allMarkers[0]?.position || myLocation || DEFAULT_CENTER;
+    const observer = new ResizeObserver(() => {
+      window.google.maps.event.trigger(map, "resize");
+      if (recenter) map.setCenter(recenter);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
   // Circles (radius search areas) need to factor into the fit too, or a big one gets clipped —
   // approximated as a lat/lng bounding box around each circle rather than a precise geodesic
   // calc, which is more precision than "don't clip the circle" actually needs.
-  const circlesKey = circles.map((c) => `${c.id}:${c.center?.lat},${c.center?.lng},${c.radiusMeters}`).join("|");
+  const circlesKey = validCircles.map((c) => `${c.id}:${c.center?.lat},${c.center?.lng},${c.radiusMeters}`).join("|");
   useEffect(() => {
+    if (lockedCenter) return; // fixed viewport — never auto-fit
     if (!map || !isLoaded || !window.google) return;
-    if (!allMarkers.length && !circles.length) return;
-    if (allMarkers.length === 1 && !circles.length) {
+    if (!allMarkers.length && !validCircles.length) return;
+    if (allMarkers.length === 1 && !validCircles.length) {
       map.setCenter(allMarkers[0].position);
       if (!zoom) map.setZoom(13);
       return;
     }
     const bounds = new window.google.maps.LatLngBounds();
     allMarkers.forEach((m) => { if (m.position) bounds.extend(m.position); });
-    circles.forEach((c) => {
+    validCircles.forEach((c) => {
       if (!c.center || !c.radiusMeters) return;
       const latDelta = c.radiusMeters / 111320;
       const lngDelta = c.radiusMeters / (111320 * Math.cos((c.center.lat * Math.PI) / 180) || 1);
@@ -286,10 +328,16 @@ export default function MapView({
     onMapClick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
   }, [onMapClick]);
 
-  const mapOptions = useMemo(
-    () => (onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS),
-    [onMapClick]
-  );
+  // gestureHandling: "none" alone already disables every pan/zoom/scroll/double-click gesture
+  // per Google's own docs — deliberately not also setting the older draggable/scrollwheel/
+  // disableDoubleClickZoom options alongside it, which turned out to fight it and leave the map
+  // rendering as a flat fill color with no tile imagery at all instead of an actual map.
+  const mapOptions = useMemo(() => {
+    if (lockedCenter) {
+      return { ...MAP_OPTIONS, gestureHandling: "none", zoomControl: false, keyboardShortcuts: false };
+    }
+    return onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS;
+  }, [onMapClick, lockedCenter]);
 
   if (loadError) {
     return (
@@ -312,8 +360,8 @@ export default function MapView({
     <GoogleMap
       mapContainerClassName={className}
       mapContainerStyle={{ width: "100%", height }}
-      center={allMarkers[0]?.position || myLocation || DEFAULT_CENTER}
-      zoom={zoom || 12}
+      center={lockedCenter || allMarkers[0]?.position || myLocation || DEFAULT_CENTER}
+      zoom={lockedCenter ? (lockedZoom || 13) : (zoom || 12)}
       onLoad={onLoad}
       onUnmount={onUnmount}
       onClick={handleClick}
@@ -322,7 +370,7 @@ export default function MapView({
       {routes.map((route) => (
         <RouteRenderer key={route.id} route={route} onResolved={handleResolved} />
       ))}
-      {circles.map((c) => (
+      {validCircles.map((c) => (
         <Circle
           key={c.id}
           center={c.center}

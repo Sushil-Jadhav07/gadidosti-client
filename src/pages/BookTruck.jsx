@@ -393,7 +393,7 @@ export default function BookTruck() {
     const interval = setInterval(fetchNearby, NEARBY_TRUCKS_POLL_MS);
     return () => { cancelled = true; clearInterval(interval); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, form.searchMode, hasPickupCoords, form.pickupLat, form.pickupLng, form.searchRadiusKm]);
+  }, [step, form.searchMode, form.pickupLat, form.pickupLng, form.searchRadiusKm]);
 
   // Transport type is no longer a manual choice — it's derived from whichever cities the
   // pickup/drop addresses resolve to: same city → Intra-City, different cities → Inter-City.
@@ -1163,6 +1163,7 @@ export default function BookTruck() {
             drop={createdBooking.drop}
             searchRadiusKm={createdBooking.searchRadiusKm}
             onBack={() => setStep(4)}
+            onCancelled={resetFlow}
           />
         ) : step === 5 && createdBooking ? (
           <ChooseBroker
