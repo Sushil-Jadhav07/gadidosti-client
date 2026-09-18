@@ -723,6 +723,43 @@ export default function BookTruck() {
       return;
     }
 
+    // A loading/unloading stop only gets lat/lng from onPlaceSelect (picking an actual
+    // autocomplete suggestion) — typing an address and never selecting one leaves it null.
+    // Submitting used to silently DROP that stop entirely (the backend filter below only ever
+    // sent stops that already had coordinates), so the client would think they'd added a stop
+    // that never actually reached the booking. Geocode any stragglers the same way pickup/drop
+    // already get a fallback (below, in the price-quote effect) — and if that still fails, stop
+    // and tell the user, instead of quietly losing the stop.
+    let loadingLocations = form.loadingLocations;
+    let unloadingLocations = form.unloadingLocations;
+    const needsGeocode = [...loadingLocations, ...unloadingLocations].some((s) => s.lat == null || s.lng == null);
+    if (needsGeocode) {
+      if (!mapsLoaded || !window.google?.maps) {
+        toast.error("Still loading maps — please wait a moment and try again.");
+        return;
+      }
+      const geocoder = new window.google.maps.Geocoder();
+      const resolveStop = async (stop) => {
+        if (stop.lat != null && stop.lng != null) return stop;
+        try {
+          const { results } = await geocoder.geocode({ address: stop.location });
+          const loc = results?.[0]?.geometry?.location;
+          if (loc) return { ...stop, lat: loc.lat(), lng: loc.lng() };
+        } catch {
+          // falls through to the unresolved case below
+        }
+        return stop;
+      };
+      loadingLocations = await Promise.all(loadingLocations.map(resolveStop));
+      unloadingLocations = await Promise.all(unloadingLocations.map(resolveStop));
+      const stillUnresolved = [...loadingLocations, ...unloadingLocations].find((s) => s.lat == null || s.lng == null);
+      if (stillUnresolved) {
+        toast.error(`Couldn't locate "${stillUnresolved.location || "one of your stops"}" — please pick it from the address suggestions.`);
+        return;
+      }
+      setForm((f) => ({ ...f, loadingLocations, unloadingLocations }));
+    }
+
     const composedNotes = form.notes.trim();
     const selectedTruck = form.truckType ? truckOptions.find((t) => t.id === form.truckType) : null;
     const isScheduled = form.bookingMode === "later";
@@ -754,8 +791,8 @@ export default function BookTruck() {
         duration_in_traffic_min: priceBreakdown.durationInTrafficMin,
         amount: finalAmount,
         payment_status: "pending",
-        add_loading_location: form.loadingLocations.filter((s) => s.lat != null && s.lng != null),
-        add_unloading_location: form.unloadingLocations.filter((s) => s.lat != null && s.lng != null),
+        add_loading_location: loadingLocations,
+        add_unloading_location: unloadingLocations,
         search_mode: form.searchMode,
         ...(form.searchMode === "truck" ? { search_radius_km: form.searchRadiusKm } : {}),
         ...(form.searchMode === "broker" ? { broker_id: form.selectedBrokerId } : {}),
