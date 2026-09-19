@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
 import { useJsApiLoader } from "@react-google-maps/api";
 import {
   Building2, Route, ArrowUpDown, Check, Truck,
@@ -15,10 +16,9 @@ import ChooseBroker from "./ChooseBroker";
 import FindTruckSearch from "./FindTruckSearch";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
-import {
-  bookingRef, haversineDistanceKm, formatDate,
-  getStoredBookingWizardState, setStoredBookingWizardState, clearStoredBookingWizardState,
-} from "../utils";
+import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
+import { store } from "../store/store";
+import { setWizardState, clearWizardState } from "../store/bookingWizardSlice";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 // Backend default when search_radius_km is omitted (see gadidosti-backend's
@@ -160,6 +160,7 @@ function MaterialTypeInput({ options, value, onChange, placeholder }) {
 // client back to their bookings instead of dropping them into a live waiting screen that would
 // never update.
 function ScheduledConfirmation({ booking, navigate }) {
+  const dispatch = useDispatch();
   const audience = booking.searchMode === "broker" ? (booking.brokerName || "your selected broker") : "nearby drivers";
   const formattedDate = booking.scheduledDate
     ? new Date(booking.scheduledDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -187,13 +188,13 @@ function ScheduledConfirmation({ booking, navigate }) {
           </div>
           <div className="flex gap-3 w-full max-w-xs">
             <button
-              onClick={() => { clearStoredBookingWizardState(); navigate(`/bookings/${booking.id}`); }}
+              onClick={() => { dispatch(clearWizardState()); navigate(`/bookings/${booking.id}`); }}
               className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors"
             >
               View Booking
             </button>
             <button
-              onClick={() => { clearStoredBookingWizardState(); navigate("/"); }}
+              onClick={() => { dispatch(clearWizardState()); navigate("/"); }}
               className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors"
             >
               Back to Home
@@ -208,13 +209,18 @@ function ScheduledConfirmation({ booking, navigate }) {
 export default function BookTruck() {
   const toast = useToast();
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const token = getToken();
   // Restored synchronously (not via an effect) so there's no flash of an empty Step 1 before
   // snapping to whatever step/form the client actually had — only for step<5 drafts, since a
   // step>=5 draft means a real booking exists and is instead restored by re-fetching it (the
-  // mount effect below), not by trusting a stale local form snapshot.
+  // mount effect below), not by trusting a stale local form snapshot. Reads straight off the
+  // store singleton (not useSelector) since this runs inside a useState lazy initializer, before
+  // any hook subscription would even be set up — the Redux store itself is already hydrated from
+  // sessionStorage by the time this module's code runs (see store.js), so this is just as
+  // immediate as the old direct sessionStorage read was.
   const [step, setStep] = useState(() => {
-    const stored = getStoredBookingWizardState();
+    const stored = store.getState().bookingWizard;
     return stored?.step && stored.step < 5 ? stored.step : 1;
   });
   const [cities, setCities] = useState(FALLBACK_CITIES);
@@ -238,7 +244,7 @@ export default function BookTruck() {
   const [confirming, setConfirming] = useState(false);
   const [validatingLocation, setValidatingLocation] = useState(false);
   const [form, setForm] = useState(() => {
-    const stored = getStoredBookingWizardState();
+    const stored = store.getState().bookingWizard;
     return stored?.step && stored.step < 5 && stored.form ? { ...INITIAL_FORM, ...stored.form } : INITIAL_FORM;
   });
   const [focusedField, setFocusedField] = useState(null);
@@ -265,7 +271,7 @@ export default function BookTruck() {
   // True only while restoring step 5 after a reload (see the mount effect below) — the wizard
   // shows a loading state instead of Step 1 during this window rather than flashing Step 1
   // before jumping to Step 5 a moment later.
-  const [rehydrating, setRehydrating] = useState(() => getStoredBookingWizardState()?.step >= 5);
+  const [rehydrating, setRehydrating] = useState(() => store.getState().bookingWizard?.step >= 5);
 
   // Reload recovery — a reload used to always dump the client back to Step 1 even mid-
   // negotiation, since step/createdBooking are plain useState. Restores Step 5 by re-fetching
@@ -275,7 +281,7 @@ export default function BookTruck() {
   // branch below — so there's no separate driver-request lookup here: FindTruckSearch and
   // ChooseBroker both discover their own in-flight negotiation on mount.
   useEffect(() => {
-    const stored = getStoredBookingWizardState();
+    const stored = store.getState().bookingWizard;
     if (!stored?.bookingId || stored.step < 5) return;
 
     (async () => {
@@ -283,7 +289,7 @@ export default function BookTruck() {
         const bookingRes = await api.get(`/api/bookings/${stored.bookingId}`, token);
         const booking = bookingRes?.data?.booking;
         if (!bookingRes?.success || !booking || booking.status === "cancelled") {
-          clearStoredBookingWizardState();
+          dispatch(clearWizardState());
           return;
         }
 
@@ -304,7 +310,7 @@ export default function BookTruck() {
 
         setStep(5);
       } catch {
-        clearStoredBookingWizardState();
+        dispatch(clearWizardState());
       } finally {
         setRehydrating(false);
       }
@@ -318,8 +324,8 @@ export default function BookTruck() {
   // by this effect immediately re-saving the (still default) Step 1 state.
   useEffect(() => {
     if (rehydrating) return;
-    setStoredBookingWizardState(step, { form, bookingId: createdBooking?.id });
-  }, [step, form, createdBooking, rehydrating]);
+    dispatch(setWizardState({ step, form, bookingId: createdBooking?.id }));
+  }, [step, form, createdBooking, rehydrating, dispatch]);
 
   // Loaded here (not just inside PlacesAutocompleteInput) so "Use my current location" knows
   // whether window.google.maps.Geocoder is actually ready before it lets the user click it.
@@ -901,7 +907,7 @@ export default function BookTruck() {
     setForm(INITIAL_FORM);
     setPriceBreakdown(null);
     setEligibleBrokers([]);
-    clearStoredBookingWizardState();
+    dispatch(clearWizardState());
   };
 
   const canContinue =

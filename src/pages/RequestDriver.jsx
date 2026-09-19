@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import { ArrowLeft, Phone, Tag, Clock3, Check, Truck, AlertTriangle, CheckCircle2, MapPin, ClipboardList } from "lucide-react";
 import PaymentSheet from "../components/PaymentSheet";
 import StepIndicator from "../components/StepIndicator";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { api, getToken } from "../services/api";
-import { setStoredDriverRequestId, clearStoredDriverRequestId, clearStoredBookingWizardState } from "../utils";
+import { setStoredDriverRequestId, clearStoredDriverRequestId } from "../utils";
+import { clearWizardState } from "../store/bookingWizardSlice";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
 
 // Socket push (see useDriverRequestSocket) is now the primary way this screen updates —
@@ -43,6 +45,7 @@ const statusLabel = (request) => {
 //     fan-out may still respond, so this is "back to waiting", not "start over".
 export default function RequestDriver({ bookingId, bookingNumber, askingPrice, pickup, drop, initialRequest, onBack, onFallbackToBrokers, variant = "broker" }) {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const toast = useToast();
   const { user } = useAuth();
   const token = getToken();
@@ -400,10 +403,10 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                 )}
               </div>
               <div className="flex gap-3">
-                <button onClick={() => { clearStoredBookingWizardState(); navigate("/track"); }} className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors">
+                <button onClick={() => { dispatch(clearWizardState()); navigate("/track"); }} className="flex-1 bg-primary text-white font-medium py-3 rounded-lg hover:bg-primary-dark transition-colors">
                   Track Booking
                 </button>
-                <button onClick={() => { clearStoredBookingWizardState(); navigate("/"); }} className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors">
+                <button onClick={() => { dispatch(clearWizardState()); navigate("/"); }} className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors">
                   Back to Home
                 </button>
               </div>

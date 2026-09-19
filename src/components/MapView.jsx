@@ -248,6 +248,20 @@ export default function MapView({
   // once, rather than trusting every caller to pre-filter its own marker/circle list.
   const isFiniteNum = (n) => typeof n === "number" && Number.isFinite(n);
   const isValidPoint = (p) => !!p && isFiniteNum(p.lat) && isFiniteNum(p.lng);
+  // lockedCenter/myLocation bypass the marker/circle filtering above entirely and go straight
+  // into GoogleMap's own `center`/Marker `position` props — coerce+validate them here too (a
+  // Postgres NUMERIC column often comes back from the API as a string, e.g. "19.076" rather
+  // than 19.076, which passes a naive `!= null` check but fails Google's own "is this a real
+  // number" validation with "setCenter: ... not a number"). Invalid input just falls back to
+  // null rather than crashing the whole map.
+  const toValidPoint = (p) => {
+    if (!p) return null;
+    const lat = Number(p.lat);
+    const lng = Number(p.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  };
+  const safeLockedCenter = toValidPoint(lockedCenter);
+  const safeMyLocation = toValidPoint(myLocation);
 
   const allMarkers = useMemo(
     () => [...(suppressRouteMarkers ? [] : routeMarkers), ...markers].filter((m) => isValidPoint(m.position)),
@@ -282,7 +296,7 @@ export default function MapView({
     if (!map || !window.google?.maps) return undefined;
     const container = map.getDiv?.();
     if (!container || typeof ResizeObserver === "undefined") return undefined;
-    const recenter = lockedCenter || allMarkers[0]?.position || myLocation || DEFAULT_CENTER;
+    const recenter = safeLockedCenter || allMarkers[0]?.position || safeMyLocation || DEFAULT_CENTER;
     const observer = new ResizeObserver(() => {
       window.google.maps.event.trigger(map, "resize");
       if (recenter) map.setCenter(recenter);
@@ -297,7 +311,7 @@ export default function MapView({
   // calc, which is more precision than "don't clip the circle" actually needs.
   const circlesKey = validCircles.map((c) => `${c.id}:${c.center?.lat},${c.center?.lng},${c.radiusMeters}`).join("|");
   useEffect(() => {
-    if (lockedCenter) return; // fixed viewport — never auto-fit
+    if (safeLockedCenter) return; // fixed viewport — never auto-fit
     if (!map || !isLoaded || !window.google) return;
     if (!allMarkers.length && !validCircles.length) return;
     if (allMarkers.length === 1 && !validCircles.length) {
@@ -333,11 +347,11 @@ export default function MapView({
   // disableDoubleClickZoom options alongside it, which turned out to fight it and leave the map
   // rendering as a flat fill color with no tile imagery at all instead of an actual map.
   const mapOptions = useMemo(() => {
-    if (lockedCenter) {
+    if (safeLockedCenter) {
       return { ...MAP_OPTIONS, gestureHandling: "none", zoomControl: false, keyboardShortcuts: false };
     }
     return onMapClick ? { ...MAP_OPTIONS, draggableCursor: "crosshair" } : MAP_OPTIONS;
-  }, [onMapClick, lockedCenter]);
+  }, [onMapClick, safeLockedCenter]);
 
   if (loadError) {
     return (
@@ -360,8 +374,8 @@ export default function MapView({
     <GoogleMap
       mapContainerClassName={className}
       mapContainerStyle={{ width: "100%", height }}
-      center={lockedCenter || allMarkers[0]?.position || myLocation || DEFAULT_CENTER}
-      zoom={lockedCenter ? (lockedZoom || 13) : (zoom || 12)}
+      center={safeLockedCenter || allMarkers[0]?.position || safeMyLocation || DEFAULT_CENTER}
+      zoom={safeLockedCenter ? (lockedZoom || 13) : (zoom || 12)}
       onLoad={onLoad}
       onUnmount={onUnmount}
       onClick={handleClick}
@@ -396,9 +410,9 @@ export default function MapView({
           onDragEnd={m.onDragEnd ? (e) => m.onDragEnd({ lat: e.latLng.lat(), lng: e.latLng.lng() }) : undefined}
         />
       ))}
-      {myLocation && (
+      {safeMyLocation && (
         <Marker
-          position={myLocation}
+          position={safeMyLocation}
           icon={MY_LOCATION_ICON(isLoaded)}
           title="Your location"
           zIndex={1000}

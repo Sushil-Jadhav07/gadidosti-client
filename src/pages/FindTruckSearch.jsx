@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useJsApiLoader } from "@react-google-maps/api";
 import { ArrowLeft, Clock3, MapPin, ClipboardList, Ruler } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import RequestDriver from "./RequestDriver";
 import MapView from "../components/MapView";
 import { api, getToken } from "../services/api";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
+import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
 const POLL_MS = 5000;
 // How long to wait before offering "Search Again"/"Cancel Search" — no visible countdown shown
@@ -222,68 +224,136 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
     }
   };
 
-  const hasPickupCoords = pickupLat != null && pickupLng != null;
-  // One marker per still-live driver who's actually reported a GPS fix — same rotating vehicle
-  // glyph used everywhere else a truck shows up on a map. Declined drivers drop off the map the
-  // same way they drop off the "Notified N drivers" count above.
+  // Loaded here too (not just inside MapView) so the fallback geocode below knows
+  // window.google.maps is actually ready before it tries to use it — normally it already is by
+  // Step 5 (Step 1's own map/autocomplete inputs load the same shared script id), but nothing
+  // upstream of this screen guarantees that.
+  const { isLoaded: mapsLoaded, loadError: mapsLoadError } = useJsApiLoader({
+    id: GOOGLE_MAPS_SCRIPT_ID,
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+  });
+
+  // Some pickup addresses (a Plus Code pasted in directly, or any free-typed text the client
+  // never chose an autocomplete suggestion for) never get lat/lng captured at all — pickupLat/
+  // pickupLng stay null despite `pickup` itself having a real address string. Without a
+  // fallback, hasPickupCoords below is permanently false for that booking and the whole map
+  // panel just shows its empty background forever, which is exactly what "map not loading"
+  // looked like — it was correctly never rendering, not failing to load.
+  //
+  // mapError surfaces WHY that fallback itself failed (a Geocoder status, or the API script
+  // load itself throwing) directly in the panel instead of a silent catch — this whole feature
+  // is otherwise invisible from the outside; if it's still broken after this, the message shown
+  // here is what to report back, since there's no way to inspect this app's own browser console
+  // from here.
+  const [fallbackCoords, setFallbackCoords] = useState(null);
+  const [mapError, setMapError] = useState(null);
+  // Postgres NUMERIC columns come back from the API as strings (a well-known pg driver quirk —
+  // BookingDetail.jsx/BookTruck.jsx wrap every lat/lng the same way for the same reason), so
+  // pickupLat/pickupLng here can easily be "19.076" rather than 19.076. `!= null` alone treats
+  // that as "present" and skips the fallback geocode below entirely, then hands the raw string
+  // straight to Google's `center` prop — which is exactly what threw "setCenter: not a LatLng
+  // or LatLngLiteral with finite coordinates: in property lat: not a number" here. Coercing with
+  // Number() and checking isFinite (not just !=null) catches strings, "", and NaN alike.
+  const numPickupLat = pickupLat != null ? Number(pickupLat) : null;
+  const numPickupLng = pickupLng != null ? Number(pickupLng) : null;
+  const hasOwnCoords = Number.isFinite(numPickupLat) && Number.isFinite(numPickupLng);
+
+  useEffect(() => {
+    if (mapsLoadError) {
+      // eslint-disable-next-line no-console
+      console.error("[FindTruckSearch] Google Maps script failed to load:", mapsLoadError);
+      setMapError(`Google Maps script failed to load: ${mapsLoadError.message || mapsLoadError}`);
+    }
+  }, [mapsLoadError]);
+
+  useEffect(() => {
+    if (hasOwnCoords || !pickup || !mapsLoaded || !window.google?.maps) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const geocoder = new window.google.maps.Geocoder();
+        const { results } = await geocoder.geocode({ address: pickup });
+        const loc = results?.[0]?.geometry?.location;
+        if (cancelled) return;
+        if (loc) {
+          setFallbackCoords({ lat: loc.lat(), lng: loc.lng() });
+        } else {
+          setMapError(`Couldn't resolve "${pickup}" to a map location (no results).`);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // A Geocoder failure rejects with either a plain string status ("REQUEST_DENIED",
+        // "OVER_QUERY_LIMIT", "ZERO_RESULTS"...) or, less commonly, an Error — handle both so
+        // the real reason always ends up on screen instead of "[object Object]".
+        const reason = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+        // eslint-disable-next-line no-console
+        console.error(`[FindTruckSearch] Geocoding "${pickup}" failed:`, err);
+        setMapError(`Couldn't resolve "${pickup}" to a map location (${reason}).`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [hasOwnCoords, pickup, mapsLoaded]);
+
+  const effectivePickupLat = hasOwnCoords ? numPickupLat : fallbackCoords?.lat ?? null;
+  const effectivePickupLng = hasOwnCoords ? numPickupLng : fallbackCoords?.lng ?? null;
+  const hasPickupCoords = Number.isFinite(effectivePickupLat) && Number.isFinite(effectivePickupLng);
+  // How many still-live drivers (not declined) have actually responded/are pending — used for
+  // the "N drivers nearby" count and the list below, but no longer plotted on the map itself or
+  // labeled with their truck — the map only ever shows the pickup point (see searchMapMarkers).
   const driverMarkers = useMemo(() => requests
-    .filter((r) => r.status !== "declined" && r.driverLat != null && r.driverLng != null)
-    .map((r) => ({
-      id: `driver-${r.id}`,
-      position: { lat: r.driverLat, lng: r.driverLng },
-      truckCategory: r.truckCategory || true,
-      heading: r.driverHeading,
-      title: `${r.driverName || "Driver"}${r.truckReg ? ` · ${r.truckReg}` : ""} — ${r.status}`,
-    })), [requests]);
+    .filter((r) => r.status !== "declined" && r.driverLat != null && r.driverLng != null),
+  [requests]);
+  // Deliberately pickup only — no driver pins, no radius circle. Those pulled the map's bounds
+  // around as drivers responded/timed out, which is exactly what made it feel like it kept
+  // "moving"; a single fixed point is simpler and matches what was actually asked for.
   const searchMapMarkers = useMemo(() => (hasPickupCoords
-    ? [{ id: "pickup", position: { lat: pickupLat, lng: pickupLng }, color: "blue", title: pickup || "Pickup" }, ...driverMarkers]
-    : driverMarkers), [hasPickupCoords, pickupLat, pickupLng, pickup, driverMarkers]);
-  const searchMapCircles = useMemo(() => (hasPickupCoords && searchRadiusKm
-    ? [{ id: "search-radius", center: { lat: pickupLat, lng: pickupLng }, radiusMeters: searchRadiusKm * 1000 }]
-    : []), [hasPickupCoords, pickupLat, pickupLng, searchRadiusKm]);
+    ? [{ id: "pickup", position: { lat: effectivePickupLat, lng: effectivePickupLng }, color: "blue", title: pickup || "Pickup" }]
+    : []), [hasPickupCoords, effectivePickupLat, effectivePickupLng, pickup]);
   // Stable object identity across polls (this component re-renders every POLL_MS) — a fresh
   // {lat,lng} literal every render was passed straight into GoogleMap's `center` prop, which
   // treats a changed reference as a real recenter request even when the values are identical,
   // and doing that repeatedly while tiles are still loading was why the map rendered as a blank
   // fill color with no imagery at all instead of an actual map.
   const lockedCenter = useMemo(
-    () => (hasPickupCoords ? { lat: pickupLat, lng: pickupLng } : null),
-    [hasPickupCoords, pickupLat, pickupLng]
+    () => (hasPickupCoords ? { lat: effectivePickupLat, lng: effectivePickupLng } : null),
+    [hasPickupCoords, effectivePickupLat, effectivePickupLng]
   );
 
   return (
     <div className="h-full flex flex-col">
       <div className="bg-white rounded-2xl shadow-card overflow-hidden flex flex-col flex-1 lg:min-h-0">
-        <div className="p-5 md:p-8 pb-0 flex-shrink-0">
-          <StepIndicator currentStep={5} onStepClick={undefined} embedded />
-          <div className="flex items-center gap-3 mb-1">
-            <button
-              onClick={onBack}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0 -ml-2"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Finding you a nearby truck</h1>
-          </div>
-          <p className="text-sm text-neutral-400 mb-6 ml-12">
-            {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
-          </p>
-
-          {error && (
-            <div className="bg-red-50 rounded-xl p-4 text-sm text-danger flex items-center gap-2 mb-4">
-              <span>Couldn't load driver responses.</span>
-              <button onClick={() => fetchRequests()} className="underline">Retry</button>
-            </div>
-          )}
-        </div>
-
-        {/* Left/right split, map on the right — and the right side is a full-bleed map (no
-            padded/bordered box around it) with the status as a floating card over it, same
-            "map fills the panel, summary floats on top" pattern BookTruck's own Step 1 map
-            panel already uses — kept visually consistent with the rest of this wizard. */}
+        {/* Left/right split, map on the right, full height from the very top — step indicator,
+            header, booking summary, and status all live in the left column now, so the right
+            side is nothing but the map (no floating card on top of it either). */}
         <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch flex-1 lg:min-h-0">
-          {/* Left: Booking Summary — same card RequestDriver.jsx/ChooseBroker.jsx use. */}
-          <div className="p-5 md:p-6 border-t border-b lg:border-b-0 lg:border-r border-neutral-100 lg:overflow-y-auto lg:min-h-0">
+          {/* min-w-0 on both grid children — without it, a grid item's default min-width:auto
+              lets long in-flow content (addresses, driver rows) force this column past its fair
+              share of the row, pushing the map column into overflow instead of just wrapping.
+              That's what the horizontal scrollbar was, and why the map looked like it "wasn't
+              loading" — it was rendering fine, just squeezed/pushed off past the visible edge. */}
+          <div className="min-w-0 p-5 md:p-8 border-b lg:border-b-0 lg:border-r border-neutral-100 lg:overflow-y-auto lg:min-h-0 no-scrollbar">
+            <StepIndicator currentStep={5} onStepClick={undefined} embedded />
+            <div className="flex items-center gap-3 mb-1">
+              <button
+                onClick={onBack}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors flex-shrink-0 -ml-2"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Finding you a nearby truck</h1>
+            </div>
+            <p className="text-sm text-neutral-400 mb-6 ml-12">
+              {pickup && drop ? `${pickup} → ${drop} · ` : ""}Asking price ₹{Number(askingPrice || 0).toLocaleString("en-IN")}
+            </p>
+
+            {error && (
+              <div className="bg-red-50 rounded-xl p-4 text-sm text-danger flex items-center gap-2 mb-4">
+                <span>Couldn't load driver responses.</span>
+                <button onClick={() => fetchRequests()} className="underline">Retry</button>
+              </div>
+            )}
+
             <p className="flex items-center gap-2 text-sm font-semibold text-neutral-800 mb-4">
               <span className="w-7 h-7 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
                 <ClipboardList className="w-3.5 h-3.5 text-primary" />
@@ -324,36 +394,12 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                 </p>
               </div>
             </div>
-          </div>
 
-          {/* Right: full-bleed map — the status/summary card floats on top of it (bottom-left),
-              never a separate boxed-in section beside/below it. */}
-          <div className="relative border-t border-neutral-100 h-full min-h-[420px] bg-neutral-50">
-            {/* Map is the base layer in every state (loading/searching/all-declined) — only the
-                floating card's content on top of it changes. Not shown at all only when pickup
-                coordinates genuinely aren't known yet. */}
-            {(searchMapMarkers.length > 0 || searchMapCircles.length > 0) && (
-              <MapView
-                markers={searchMapMarkers}
-                circles={searchMapCircles}
-                lockedCenter={lockedCenter}
-                lockedZoom={zoomForRadiusKm(searchRadiusKm)}
-                height="100%"
-                className="absolute inset-0"
-              />
-            )}
-            {isActivelySearching && <RadarPulse />}
-
-            {!allDeclined && (
-              <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                {loading ? "Notifying nearby drivers..." : driverMarkers.length === 0 ? "Searching nearby..." : `${driverMarkers.length} driver${driverMarkers.length === 1 ? "" : "s"} nearby`}
-              </div>
-            )}
-
-            <div className="absolute bottom-3 left-3 right-3 md:right-auto md:w-80 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 max-h-[calc(100%-1.5rem)] overflow-y-auto text-left">
+            {/* Status — was a floating card over the map; now sits here so the map on the
+                right stays completely clear except the pickup pin itself. */}
+            <div className="mt-6 pt-6 border-t border-neutral-100">
               {loading ? (
-                <div className="flex items-center gap-2.5 py-1">
+                <div className="flex items-center gap-2.5">
                   <span className="w-5 h-5 border-2 border-primary/20 border-t-primary rounded-full animate-spin flex-shrink-0" />
                   <p className="text-sm text-neutral-500">Notifying nearby drivers...</p>
                 </div>
@@ -400,7 +446,7 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                         .filter((r) => r.status !== "declined")
                         .map((r) => (
                           <div key={r.id} className="flex items-center justify-between gap-2 bg-neutral-50 rounded-lg px-3 py-2 text-xs">
-                            <span className="font-medium text-neutral-700 truncate">{r.driverName || "Driver"}{r.truckReg ? ` · ${r.truckReg}` : ""}</span>
+                            <span className="font-medium text-neutral-700 truncate">{r.driverName || "Driver"}</span>
                             <span className="text-neutral-400 flex-shrink-0 capitalize">{r.status.replace(/_/g, " ")}</span>
                           </div>
                         ))}
@@ -435,6 +481,27 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                 </>
               )}
             </div>
+          </div>
+
+          {/* Right: nothing but the map — pickup location only, fixed/locked, full height. */}
+          <div className="relative min-w-0 h-full min-h-[420px] bg-neutral-50">
+            {hasPickupCoords && (
+              <MapView
+                markers={searchMapMarkers}
+                lockedCenter={lockedCenter}
+                lockedZoom={zoomForRadiusKm(searchRadiusKm)}
+                height="100%"
+                className="absolute inset-0"
+              />
+            )}
+            {isActivelySearching && <RadarPulse />}
+            {!hasPickupCoords && (
+              <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+                <p className="max-w-xs text-center text-xs font-medium text-neutral-500 bg-white/90 rounded-lg px-3 py-2 shadow-card">
+                  {mapError || (mapsLoaded ? "Resolving pickup location..." : "Loading map...")}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

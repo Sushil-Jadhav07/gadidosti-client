@@ -78,29 +78,6 @@ export const clearStoredDriverRequestId = (bookingId) => {
   try { localStorage.removeItem(driverRequestStorageKey(bookingId)); } catch { /* ignore */ }
 };
 
-// Lets BookTruck.jsx survive a page reload on ANY step, not just once the booking exists
-// (Step 5+) — before that there's nothing to re-fetch, so `form` itself is what's persisted;
-// from Step 5 onward the booking is the source of truth, so only `bookingId` matters and the
-// form snapshot is ignored on restore (see BookTruck's rehydration effect). sessionStorage (not
-// localStorage) is deliberate — this should only survive a reload of the same tab/session, not
-// linger indefinitely across days once the booking is long since resolved one way or another.
-const BOOKING_WIZARD_STORAGE_KEY = "ssk_booking_wizard";
-
-export const getStoredBookingWizardState = () => {
-  try {
-    const raw = sessionStorage.getItem(BOOKING_WIZARD_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-};
-
-export const setStoredBookingWizardState = (step, { form, bookingId } = {}) => {
-  try { sessionStorage.setItem(BOOKING_WIZARD_STORAGE_KEY, JSON.stringify({ step, form, bookingId })); } catch { /* ignore */ }
-};
-
-export const clearStoredBookingWizardState = () => {
-  try { sessionStorage.removeItem(BOOKING_WIZARD_STORAGE_KEY); } catch { /* ignore */ }
-};
-
 // Holds this device's current FCM push token (see src/lib/firebase.js and
 // usePushNotifications) so AuthContext's logout() can unregister it (DELETE
 // /api/users/device-token) without the hook and the auth context needing to know about
