@@ -47,13 +47,14 @@ const NEEDS_ACTION_RANK = 2;
 // locked (non-interactive) map below — picked from a lookup table rather than computed from the
 // container's actual pixel size, which this component has no reliable way to read up front.
 const zoomForRadiusKm = (km) => {
-  if (!km || km <= 2) return 13;
-  if (km <= 5) return 12;
-  if (km <= 10) return 11;
-  if (km <= 20) return 10;
-  if (km <= 50) return 9;
-  if (km <= 100) return 8;
-  return 6;
+  if (!km || km <= 1) return 15;
+  if (km <= 2) return 14;
+  if (km <= 5) return 13;
+  if (km <= 10) return 12;
+  if (km <= 20) return 11;
+  if (km <= 50) return 10;
+  if (km <= 100) return 9;
+  return 7;
 };
 
 // Elapsed seconds since this screen actually started actively searching (i.e. since `active`
@@ -436,6 +437,21 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                   <p className="text-xs text-neutral-400 mb-3">
                     Waiting for a response — this screen updates automatically the moment someone accepts or counters.
                   </p>
+
+                  {/* Same idea as Ola/Uber's driver-search screen: a bar that visibly moves so
+                      the search reads as "actively working," without exposing a literal
+                      countdown (which just invites staring at the clock and reads as a
+                      deadline/failure once it runs out). Fills smoothly over the real
+                      SEARCH_PROGRESS_SECONDS window, then settles into a slow indefinite pulse
+                      once that window's up but drivers are still being waited on — same signal
+                      Ola/Uber give when a search runs long instead of just stalling visually. */}
+                  <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden mb-3">
+                    <div
+                      className={`h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear ${searchTimedOut ? "animate-pulse" : ""}`}
+                      style={{ width: `${Math.min(100, (elapsedSeconds / SEARCH_PROGRESS_SECONDS) * 100)}%` }}
+                    />
+                  </div>
+
                   <p className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary-50 text-primary mb-3">
                     <Clock3 className="w-3 h-3" /> First to accept gets the job
                   </p>
@@ -451,6 +467,26 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                           </div>
                         ))}
                     </div>
+                  )}
+
+                  {/* Available from the moment the search starts, not just after it times out —
+                      the driver only ever asked to cancel once, but the old timed-out-only
+                      button meant there was no way out for a full 60s no matter what. Kept
+                      low-emphasis (plain text, not a solid button) so it doesn't compete with
+                      "First to accept gets the job" for attention while things are still going
+                      normally; the prominent Cancel Search button below still takes over once
+                      the search has actually stalled. */}
+                  {!searchTimedOut && (
+                    <>
+                      {cancelError && <p className="text-[11px] text-danger mb-2">{cancelError}</p>}
+                      <button
+                        onClick={handleCancelSearch}
+                        disabled={cancelling}
+                        className="text-[11px] font-medium text-neutral-400 hover:text-danger underline underline-offset-2 transition-colors disabled:opacity-60"
+                      >
+                        {cancelling ? "Cancelling..." : "Cancel search"}
+                      </button>
+                    </>
                   )}
 
                   {searchTimedOut && (

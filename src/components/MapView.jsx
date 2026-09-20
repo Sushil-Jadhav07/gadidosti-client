@@ -306,6 +306,19 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
+  // Belt-and-suspenders for the locked-viewport case: the `zoom`/`center` props on <GoogleMap>
+  // below are only actually applied by the underlying library on that element's very first
+  // mount — if this component (or its parent) ever re-renders with a *different* lockedZoom/
+  // lockedCenter value without a full unmount/remount in between (e.g. searchRadiusKm arriving
+  // a render late), the prop change alone wouldn't move the already-mounted map. Setting both
+  // imperatively here, keyed off the actual values, guarantees the locked view always matches
+  // whatever was asked for.
+  useEffect(() => {
+    if (!map || !safeLockedCenter) return;
+    map.setCenter(safeLockedCenter);
+    map.setZoom(lockedZoom || 13);
+  }, [map, safeLockedCenter, lockedZoom]);
+
   // Circles (radius search areas) need to factor into the fit too, or a big one gets clipped —
   // approximated as a lat/lng bounding box around each circle rather than a precise geodesic
   // calc, which is more precision than "don't clip the circle" actually needs.
