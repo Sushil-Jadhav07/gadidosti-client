@@ -7,6 +7,7 @@ import {
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
 import PodGallery from "../components/PodGallery";
+import SelectDropdown from "../components/SelectDropdown";
 import MapView from "../components/MapView";
 import HaltingTimer from "../components/HaltingTimer";
 import ChatWindow from "../components/ChatWindow";
@@ -900,16 +901,13 @@ function RaiseDisputeSheet({ booking, onSubmit, onCancel }) {
       </p>
 
       <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Issue Type</label>
-      <select
+      <SelectDropdown
+        options={ISSUE_TYPES.map((item) => ({ value: item.value, label: item.label }))}
         value={issueType}
-        onChange={(e) => setIssueType(e.target.value)}
-        className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-4"
-      >
-        <option value="">Select an issue...</option>
-        {ISSUE_TYPES.map((item) => (
-          <option key={item.value} value={item.value}>{item.label}</option>
-        ))}
-      </select>
+        onChange={setIssueType}
+        placeholder="Select an issue..."
+        className="mb-4"
+      />
 
       <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Description</label>
       <textarea
