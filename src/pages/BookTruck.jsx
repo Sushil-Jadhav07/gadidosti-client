@@ -1741,6 +1741,18 @@ export default function BookTruck() {
                                   <p className="text-[11px] text-neutral-400 mt-0.5">Includes transit insurance</p>
                                 )}
                               </div>
+                            ) : priceBreakdown && form.truckType === "part" ? (
+                              // The only way the toggle can be on here yet the quote still come
+                              // back with isExpress: false — see pricing.model.js's expressActive
+                              // (transportType !== 'inter' is already guaranteed by the outer
+                              // `form.transportType === "intra"` check above, so truck_category
+                              // 'part' is the only remaining silent-failure case). Used to just
+                              // render nothing here, which is exactly what made this look like
+                              // "Express isn't working" for a route that worked fine last time —
+                              // only the truck type picked this time was different.
+                              <p className="text-[11px] font-semibold text-amber-600 mt-1.5">
+                                Express Delivery isn't available for Part Load — pick a different truck type to use it.
+                              </p>
                             ) : null
                           )}
                         </div>
