@@ -27,6 +27,7 @@ import AddressForm from "./pages/AddressForm";
 import PaymentMethods from "./pages/PaymentMethods";
 import Notifications from "./pages/Notifications";
 import MonthlyHiring from "./pages/MonthlyHiring";
+import MonthlyHiringForm from "./pages/MonthlyHiringForm";
 
 const PAGE_TITLES = {
   "/": "Dashboard",
@@ -39,6 +40,8 @@ const PAGE_TITLES = {
   "/addresses/new": "Add Address",
   "/payment-methods": "Payment Methods",
   "/notifications": "Notifications",
+  "/monthly-hiring": "Monthly Vehicle Hiring",
+  "/monthly-hiring/new": "New Enquiry",
 };
 
 function WebLayout({ children, hideTopBar }) {
@@ -258,6 +261,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <MonthlyHiring />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/monthly-hiring/new"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <MonthlyHiringForm />
             </WebLayout>
           </ProtectedRoute>
         }
