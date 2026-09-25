@@ -1,6 +1,6 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle, CalendarClock } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useNotifications } from "../hooks/useNotifications";
 import { useChatUnread } from "../context/ChatUnreadContext";
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { path: "/book", label: "Book a Truck", Icon: PlusCircle },
   { path: "/bookings", label: "My Bookings", Icon: ClipboardList },
   { path: "/track", label: "Track Shipment", Icon: MapPin },
+  { path: "/monthly-hiring", label: "Monthly Hiring", Icon: CalendarClock },
   { path: "/profile", label: "Profile", Icon: User },
 ];
 

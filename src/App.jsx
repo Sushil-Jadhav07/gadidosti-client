@@ -26,6 +26,7 @@ import SavedAddresses from "./pages/SavedAddresses";
 import AddressForm from "./pages/AddressForm";
 import PaymentMethods from "./pages/PaymentMethods";
 import Notifications from "./pages/Notifications";
+import MonthlyHiring from "./pages/MonthlyHiring";
 
 const PAGE_TITLES = {
   "/": "Dashboard",
@@ -247,6 +248,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <PaymentMethods />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/monthly-hiring"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <MonthlyHiring />
             </WebLayout>
           </ProtectedRoute>
         }
