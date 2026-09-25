@@ -48,6 +48,8 @@ export default function BookingDetail() {
   const [showDisputeSheet, setShowDisputeSheet] = useState(false);
   const [showEmailSheet, setShowEmailSheet] = useState(false);
   const [showCancelSheet, setShowCancelSheet] = useState(false);
+  const [showRejectPodSheet, setShowRejectPodSheet] = useState(false);
+  const [verifyingPod, setVerifyingPod] = useState(false);
   const [loadingPod, setLoadingPod] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
@@ -99,6 +101,30 @@ export default function BookingDetail() {
     setBooking((current) => (current ? { ...current, status: "Cancelled", paymentStatus: current.paymentStatus === "Paid" ? "Refunded" : current.paymentStatus } : current));
     setShowCancelSheet(false);
     toast.success("Booking cancelled");
+  };
+
+  const handleVerifyPod = async () => {
+    if (!booking?.tripId) return;
+    setVerifyingPod(true);
+    try {
+      const res = await api.patch(`/api/trips/${booking.tripId}/pod/verify`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to approve proof of delivery");
+      setBooking((current) => (current ? { ...current, podStatus: "verified" } : current));
+      toast.success("Proof of delivery approved");
+    } catch (err) {
+      toast.error(err?.message || "Failed to approve proof of delivery");
+    } finally {
+      setVerifyingPod(false);
+    }
+  };
+
+  const handleRejectPod = async (reason) => {
+    if (!booking?.tripId) return;
+    const res = await api.patch(`/api/trips/${booking.tripId}/pod/reject`, { reason }, token);
+    if (!res?.success) throw new Error(res?.message || "Failed to reject proof of delivery");
+    setBooking((current) => (current ? { ...current, podStatus: "rejected", podRejectionReason: reason } : current));
+    setShowRejectPodSheet(false);
+    toast.success("Asked the driver to re-upload proof of delivery");
   };
 
   const handlePaySuccess = async (paidBooking) => {
@@ -474,6 +500,38 @@ export default function BookingDetail() {
                   <Camera className="w-4 h-4 text-primary" /> Proof of Delivery
                 </p>
                 <PodGallery media={booking.podMedia} token={token} />
+
+                {booking.podStatus === "pending_verification" && (
+                  <div className="mt-3 pt-3 border-t border-neutral-200">
+                    <p className="text-xs text-neutral-500 mb-2.5">Does this look right? Approve to let the driver close out the trip, or reject to ask for new photos.</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleVerifyPod}
+                        disabled={verifyingPod}
+                        className="flex-1 py-2 bg-primary text-white rounded-lg text-xs font-medium hover:bg-primary-dark transition-colors disabled:opacity-60"
+                      >
+                        {verifyingPod ? "Approving..." : "Approve"}
+                      </button>
+                      <button
+                        onClick={() => setShowRejectPodSheet(true)}
+                        disabled={verifyingPod}
+                        className="flex-1 py-2 text-xs font-medium text-danger border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {booking.podStatus === "verified" && (
+                  <p className="mt-3 pt-3 border-t border-neutral-200 flex items-center gap-1.5 text-xs font-medium text-success">
+                    <Check className="w-3.5 h-3.5" /> Approved
+                  </p>
+                )}
+                {booking.podStatus === "rejected" && (
+                  <p className="mt-3 pt-3 border-t border-neutral-200 text-xs text-neutral-500">
+                    You asked the driver to re-upload{booking.podRejectionReason ? `: "${booking.podRejectionReason}"` : "."} Waiting for new photos.
+                  </p>
+                )}
               </div>
             ) : booking.podUrl && (
               <button
@@ -773,6 +831,10 @@ export default function BookingDetail() {
         <CancelBookingSheet booking={booking} onSubmit={handleCancel} onCancel={() => setShowCancelSheet(false)} />
       </BottomSheet>
 
+      <BottomSheet isOpen={showRejectPodSheet} onClose={() => setShowRejectPodSheet(false)}>
+        <RejectPodSheet onSubmit={handleRejectPod} onCancel={() => setShowRejectPodSheet(false)} />
+      </BottomSheet>
+
       <BottomSheet isOpen={showEmailSheet} onClose={() => setShowEmailSheet(false)}>
         <EmailInvoiceSheet booking={booking} defaultTo={user?.email || ""} onClose={() => setShowEmailSheet(false)} />
       </BottomSheet>
@@ -940,6 +1002,60 @@ function RaiseDisputeSheet({ booking, onSubmit, onCancel }) {
 
 // Asks for a reason before cancelling — sent to whichever driver/broker is currently assigned
 // so they know why, not just that it happened. Same shape as RaiseDisputeSheet above.
+function RejectPodSheet({ onSubmit, onCancel }) {
+  const toast = useToast();
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!reason.trim()) {
+      toast.error("Please tell the driver what's wrong with the photos");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(reason.trim());
+    } catch (err) {
+      toast.error(err?.message || "Failed to reject proof of delivery");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Reject proof of delivery?</h3>
+      <p className="text-sm text-neutral-400 mb-5">The driver will be asked to upload new photos before the trip can be completed.</p>
+
+      <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Reason for rejecting</label>
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. Photos are blurry/too dark, doesn't show the delivered cargo..."
+        maxLength={500}
+        rows={4}
+        className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary mb-5"
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onCancel}
+          className="flex-1 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          className="flex-1 py-2.5 bg-danger text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+        >
+          {submitting ? "Rejecting..." : "Reject"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CancelBookingSheet({ booking, onSubmit, onCancel }) {
   const toast = useToast();
   const [reason, setReason] = useState("");
