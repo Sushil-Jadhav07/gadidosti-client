@@ -3,6 +3,7 @@ import { useJsApiLoader } from "@react-google-maps/api";
 import { ArrowLeft, Clock3, MapPin, ClipboardList, Ruler } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import RequestDriver from "./RequestDriver";
+import DriverOfferCard from "../components/DriverOfferCard";
 import MapView from "../components/MapView";
 import { api, getToken } from "../services/api";
 import { useDriverRequestSocket } from "../hooks/useDriverRequestSocket";
@@ -35,13 +36,11 @@ function RadarPulse() {
   );
 }
 
-// Same priority scheme ChooseBroker.jsx uses to pick a single "primary" offer — but here it
-// also decides WHETHER to hand off to the single-request <RequestDriver> negotiation card at
-// all: a merely 'pending' request (driver hasn't responded yet) never promotes on its own,
-// since with N fanned-out drivers there's no single one worth spotlighting until one of them
-// actually does something. 'countered'/'awaiting_confirmation'/'accepted' all do.
+// Every live (non-declined) fanned-out driver gets its own negotiable card (see
+// DriverOfferCard) — this only decides display order within that list, surfacing whichever
+// offers most need the client's attention (countered/awaiting-confirmation) above ones still
+// just sitting at 'pending'.
 const RANK = { accepted: 4, awaiting_confirmation: 3, countered: 2, pending: 1 };
-const NEEDS_ACTION_RANK = 2;
 
 // A fixed zoom level that comfortably shows the search-radius circle for a given radius, for the
 // locked (non-interactive) map below — picked from a lookup table rather than computed from the
@@ -87,11 +86,12 @@ function useElapsedSeconds(active) {
 // broadcast the booking to every available driver within search_radius_km, one driver_requests
 // row per driver (see gadidosti-backend's booking.controller.js broadcastBooking). This screen
 // polls GET /api/bookings/:id/driver-requests (NOT /api/driver-requests/booking/:bookingId,
-// which only ever returns one arbitrary row and can't represent a fan-out) until any one of
-// those rows needs the client's attention, then hands off entirely to <RequestDriver> — the
-// exact same single-target accept/negotiate/mutual-confirm/payment flow the broker-assigned
-// path already uses — so declining that one driver returns here to keep waiting on the rest,
-// rather than ending the search.
+// which only ever returns one arbitrary row and can't represent a fan-out) and renders every
+// live (non-declined) row as its own <DriverOfferCard> — the client can accept/counter/decline
+// each independently, same map/step the whole time. Only once one of them is actually fully
+// accepted (both sides confirmed) does this hand off to the single-target <RequestDriver> —
+// which already owns the confirmed/payment flow — so declining one driver just removes that
+// card and keeps waiting on the rest, rather than ending the search.
 export default function FindTruckSearch({ bookingId, bookingNumber, askingPrice, pickup, pickupLat, pickupLng, drop, searchRadiusKm, onBack, onCancelled }) {
   const [driverRequest, setDriverRequest] = useState(null);
 
@@ -168,14 +168,28 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
     });
   });
 
-  // The moment any fanned-out request reaches something requiring the client's turn, hand off
-  // to the single-request negotiation card and stop polling this list (unmounts this component).
+  // Every live offer stays in this list, independently negotiable via its own DriverOfferCard —
+  // only once one of them is actually fully accepted (both sides confirmed) does this hand off
+  // to the single-target <RequestDriver>, which owns the confirmed/payment flow.
   useEffect(() => {
-    const live = requests.filter((r) => r.status !== "declined");
-    if (!live.length) return;
-    const best = live.reduce((a, b) => ((RANK[b.status] || 0) > (RANK[a.status] || 0) ? b : a));
-    if ((RANK[best.status] || 0) >= NEEDS_ACTION_RANK) onPromote(best);
+    const confirmed = requests.find((r) => r.status === "accepted");
+    if (confirmed) onPromote(confirmed);
   }, [requests, onPromote]);
+
+  // A card's own action (accept/counter/decline) resolves before the next poll/socket push
+  // would otherwise reflect it — this merges that result straight into the list so the card
+  // updates instantly instead of waiting up to POLL_MS.
+  const handleCardChange = (updated) => {
+    if (!updated?.id) return;
+    setRequests((current) => current.map((r) => (r.id === updated.id ? updated : r)));
+  };
+
+  const liveRequests = useMemo(
+    () => requests
+      .filter((r) => r.status !== "declined")
+      .sort((a, b) => (RANK[b.status] || 0) - (RANK[a.status] || 0)),
+    [requests]
+  );
 
   const totalCount = requests.length;
   const declinedCount = requests.filter((r) => r.status === "declined").length;
@@ -299,12 +313,6 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
   const effectivePickupLat = hasOwnCoords ? numPickupLat : fallbackCoords?.lat ?? null;
   const effectivePickupLng = hasOwnCoords ? numPickupLng : fallbackCoords?.lng ?? null;
   const hasPickupCoords = Number.isFinite(effectivePickupLat) && Number.isFinite(effectivePickupLng);
-  // How many still-live drivers (not declined) have actually responded/are pending — used for
-  // the "N drivers nearby" count and the list below, but no longer plotted on the map itself or
-  // labeled with their truck — the map only ever shows the pickup point (see searchMapMarkers).
-  const driverMarkers = useMemo(() => requests
-    .filter((r) => r.status !== "declined" && r.driverLat != null && r.driverLng != null),
-  [requests]);
   // Deliberately pickup only — no driver pins, no radius circle. Those pulled the map's bounds
   // around as drivers responded/timed out, which is exactly what made it feel like it kept
   // "moving"; a single fixed point is simpler and matches what was actually asked for.
@@ -456,16 +464,11 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
                     <Clock3 className="w-3 h-3" /> First to accept gets the job
                   </p>
 
-                  {driverMarkers.length > 0 && (
-                    <div className="space-y-1.5 mb-3">
-                      {requests
-                        .filter((r) => r.status !== "declined")
-                        .map((r) => (
-                          <div key={r.id} className="flex items-center justify-between gap-2 bg-neutral-50 rounded-lg px-3 py-2 text-xs">
-                            <span className="font-medium text-neutral-700 truncate">{r.driverName || "Driver"}</span>
-                            <span className="text-neutral-400 flex-shrink-0 capitalize">{r.status.replace(/_/g, " ")}</span>
-                          </div>
-                        ))}
+                  {liveRequests.length > 0 && (
+                    <div className="space-y-2.5 mb-3">
+                      {liveRequests.map((r) => (
+                        <DriverOfferCard key={r.id} request={r} askingPrice={askingPrice} onChange={handleCardChange} />
+                      ))}
                     </div>
                   )}
 
