@@ -124,6 +124,14 @@ module.exports = {
           "0%": { transform: "scale(1)", opacity: "0.7" },
           "100%": { transform: "scale(14)", opacity: "0" },
         },
+        "trip-slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(24px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        "trip-slide-in-left": {
+          "0%": { opacity: "0", transform: "translateX(-24px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s infinite linear",
@@ -140,6 +148,8 @@ module.exports = {
         "green-pulse": "green-pulse 2s infinite",
         "typing-dot": "typing-dot 1.2s ease-in-out infinite",
         "radar-ping": "radar-ping 2.1s cubic-bezier(0.2, 0.6, 0.4, 1) infinite",
+        "trip-slide-in-right": "trip-slide-in-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        "trip-slide-in-left": "trip-slide-in-left 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
       },
     },
   },
