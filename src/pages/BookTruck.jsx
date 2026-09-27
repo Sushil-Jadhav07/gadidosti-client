@@ -18,6 +18,7 @@ import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
 import { store } from "../store/store";
+import { TRUCK_TYPES } from "../lib/truckTypes";
 import { setWizardState, clearWizardState } from "../store/bookingWizardSlice";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
@@ -37,9 +38,7 @@ const NEARBY_TRUCKS_POLL_MS = 8000;
 const FALLBACK_CITIES = ["Mumbai", "Pune", "Delhi", "Bengaluru", "Chennai", "Hyderabad", "Kolkata", "Ahmedabad"];
 const FALLBACK_MATERIALS = ["Electronics", "Furniture", "Textiles", "Machinery", "Food & Groceries", "Construction Material", "Chemicals", "General Cargo"];
 const FALLBACK_TRUCKS = [
-  { id: "small", name: "Small Truck", capacity: "Up to 1 Ton", basePrice: 500 },
-  { id: "medium", name: "Medium Truck", capacity: "1 - 5 Tons", basePrice: 800 },
-  { id: "large", name: "Large Truck", capacity: "5 - 15 Tons", basePrice: 1200 },
+  ...TRUCK_TYPES.map((t) => ({ id: t.value, name: t.label, capacity: t.capacity, basePrice: null })),
   { id: "part", name: "Part Load", capacity: "Shared Space", basePrice: null },
 ];
 

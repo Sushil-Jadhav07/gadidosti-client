@@ -4,14 +4,9 @@ import { ArrowLeft, MapPin, Truck, IndianRupee, FileText, Send } from "lucide-re
 import SelectDropdown from "../components/SelectDropdown";
 import { api, getToken } from "../services/api";
 import { useToast } from "../context/ToastContext";
+import { TRUCK_TYPES } from "../lib/truckTypes";
 
-const TRUCK_CATEGORIES = [
-  { value: "", label: "Any category" },
-  { value: "small", label: "Small" },
-  { value: "medium", label: "Medium" },
-  { value: "large", label: "Large" },
-  { value: "part", label: "Part Load" },
-];
+const TRUCK_CATEGORIES = [{ value: "", label: "Any category" }, ...TRUCK_TYPES.map((t) => ({ value: t.value, label: t.label }))];
 
 const EMPTY_FORM = { location: "", truck_category: "", duration_months: "", pricing_type: "fixed", budget_amount: "", description: "" };
 
