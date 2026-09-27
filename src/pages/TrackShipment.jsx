@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star, Link2, Zap } from "lucide-react";
+import { Search, Phone, Check, Truck, MapPin, Clock, AlertTriangle, Package, Hash, PackagePlus, PackageMinus, CheckCircle2, Star, Link2, Zap, Camera } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import BottomSheet from "../components/BottomSheet";
 import ChatWindow from "../components/ChatWindow";
 import TripChatFab from "../components/TripChatFab";
 import MapView from "../components/MapView";
 import HaltingTimer from "../components/HaltingTimer";
+import PodGallery from "../components/PodGallery";
+import RejectPodSheet from "../components/RejectPodSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
@@ -83,6 +85,9 @@ export default function TrackShipment() {
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [noBookingsYet, setNoBookingsYet] = useState(false);
+  const [showRejectPodSheet, setShowRejectPodSheet] = useState(false);
+  const [verifyingPod, setVerifyingPod] = useState(false);
+  const [loadingPod, setLoadingPod] = useState(false);
   // Shown once the live socket push (below) actually catches a transition into "Delivered" —
   // not just because the booking happens to already be delivered on load, which would nudge for
   // a rating every time this page is revisited for an old delivered shipment.
@@ -108,6 +113,46 @@ export default function TrackShipment() {
       if (err?.name !== "AbortError") toast.error(err?.message || "Failed to share tracking link");
     } finally {
       setSharingTracking(false);
+    }
+  };
+
+  // Same POD approve/reject flow as BookingDetail.jsx — duplicated here rather than shared since
+  // each page keeps its own booking state (activeBooking vs. booking) and updates it locally on
+  // success instead of a full re-fetch.
+  const handleVerifyPod = async () => {
+    if (!activeBooking?.tripId) return;
+    setVerifyingPod(true);
+    try {
+      const res = await api.patch(`/api/trips/${activeBooking.tripId}/pod/verify`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to approve proof of delivery");
+      setActiveBooking((current) => (current ? { ...current, podStatus: "verified" } : current));
+      toast.success("Proof of delivery approved");
+    } catch (err) {
+      toast.error(err?.message || "Failed to approve proof of delivery");
+    } finally {
+      setVerifyingPod(false);
+    }
+  };
+
+  const handleRejectPod = async (reason) => {
+    if (!activeBooking?.tripId) return;
+    const res = await api.patch(`/api/trips/${activeBooking.tripId}/pod/reject`, { reason }, token);
+    if (!res?.success) throw new Error(res?.message || "Failed to reject proof of delivery");
+    setActiveBooking((current) => (current ? { ...current, podStatus: "rejected", podRejectionReason: reason } : current));
+    setShowRejectPodSheet(false);
+    toast.success("Asked the driver to re-upload proof of delivery");
+  };
+
+  const viewProofOfDelivery = async () => {
+    if (!activeBooking?.podUrl || loadingPod) return;
+    setLoadingPod(true);
+    try {
+      const blobUrl = await api.getFileBlobUrl(activeBooking.podUrl, token);
+      window.open(blobUrl, "_blank");
+    } catch (err) {
+      toast.error(err?.message || "Failed to load proof of delivery");
+    } finally {
+      setLoadingPod(false);
     }
   };
 
@@ -519,6 +564,60 @@ export default function TrackShipment() {
               })()}
             </div>
 
+            {/* Proof of Delivery — same gallery + approve/reject flow as BookingDetail.jsx,
+                surfaced here too so it doesn't only show up after navigating away from tracking. */}
+            {activeBooking.podMedia?.length > 0 ? (
+              <div className="bg-white rounded-xl shadow-card p-4">
+                <p className="text-sm font-medium text-neutral-700 mb-2.5 flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-primary" /> Proof of Delivery
+                </p>
+                <PodGallery media={activeBooking.podMedia} token={token} />
+
+                {activeBooking.podStatus === "pending_verification" && (
+                  <div className="mt-3 pt-3 border-t border-neutral-100">
+                    <p className="text-xs text-neutral-500 mb-2.5">Does this look right? Approve to let the driver close out the trip, or reject to ask for new photos.</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleVerifyPod}
+                        disabled={verifyingPod}
+                        className="flex-1 py-2 bg-success text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60"
+                      >
+                        {verifyingPod ? "Approving..." : "Approve"}
+                      </button>
+                      <button
+                        onClick={() => setShowRejectPodSheet(true)}
+                        disabled={verifyingPod}
+                        className="flex-1 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {activeBooking.podStatus === "verified" && (
+                  <p className="mt-3 pt-3 border-t border-neutral-100 flex items-center gap-1.5 text-xs font-medium text-success">
+                    <Check className="w-3.5 h-3.5" /> Approved
+                  </p>
+                )}
+                {activeBooking.podStatus === "rejected" && (
+                  <p className="mt-3 pt-3 border-t border-neutral-100 text-xs text-neutral-500">
+                    You asked the driver to re-upload{activeBooking.podRejectionReason ? `: "${activeBooking.podRejectionReason}"` : "."} Waiting for new photos.
+                  </p>
+                )}
+              </div>
+            ) : activeBooking.podUrl && (
+              <button
+                onClick={viewProofOfDelivery}
+                disabled={loadingPod}
+                className="w-full flex items-center gap-2.5 bg-white shadow-card rounded-xl p-4 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+              >
+                <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary flex items-center justify-center flex-shrink-0">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <span className="text-sm font-medium text-neutral-700">{loadingPod ? "Loading..." : "View Proof of Delivery"}</span>
+              </button>
+            )}
+
             {/* Quick Stats */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-white rounded-xl shadow-card p-4">
@@ -670,6 +769,10 @@ export default function TrackShipment() {
             <ChatWindow bookingId={activeBooking.id} currentUserId={user?.id} />
           </div>
         )}
+      </BottomSheet>
+
+      <BottomSheet isOpen={showRejectPodSheet} onClose={() => setShowRejectPodSheet(false)}>
+        <RejectPodSheet onSubmit={handleRejectPod} onCancel={() => setShowRejectPodSheet(false)} />
       </BottomSheet>
     </div>
   );

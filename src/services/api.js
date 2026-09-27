@@ -7,6 +7,19 @@ const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 // call surfaces the same re-login popup instead of a silent/generic error.
 export const SESSION_EXPIRED_EVENT = 'auth:session-expired';
 
+// A 422 validation failure's `message` is always the generic "Validation failed" — the actually
+// useful, field-specific reason (e.g. "PAN number must be in the format ABCDE1234F") lives in
+// `errors[].msg` instead. Every call site just does `throw new Error(res.message)`, so folding
+// the specific reason into `message` here — the one place every request passes through — fixes
+// it everywhere at once, with no changes needed at any individual call site.
+const withValidationDetail = (data) => {
+  if (data?.success === false && Array.isArray(data.errors) && data.errors.length > 0) {
+    const detail = data.errors.map((e) => e?.msg).filter(Boolean).join('; ');
+    if (detail) data.message = detail;
+  }
+  return data;
+};
+
 const request = async (method, path, body, token) => {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -19,7 +32,7 @@ const request = async (method, path, body, token) => {
   if (res.status === 401 && token) {
     window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
   }
-  return res.json();
+  return withValidationDetail(await res.json());
 };
 
 // Fetches a file (e.g. a proof-of-delivery photo) with the auth header attached and
