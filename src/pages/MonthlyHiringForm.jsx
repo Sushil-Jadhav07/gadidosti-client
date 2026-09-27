@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, MapPin, Truck, IndianRupee, FileText, Send } from "lucide-react";
+import { ArrowLeft, MapPin, Truck, CalendarDays, IndianRupee, FileText, Send } from "lucide-react";
 import SelectDropdown from "../components/SelectDropdown";
+import DatePicker from "../components/DatePicker";
 import { api, getToken } from "../services/api";
 import { useToast } from "../context/ToastContext";
 import { TRUCK_TYPES } from "../lib/truckTypes";
 
 const TRUCK_CATEGORIES = [{ value: "", label: "Any category" }, ...TRUCK_TYPES.map((t) => ({ value: t.value, label: t.label }))];
 
-const EMPTY_FORM = { location: "", truck_category: "", duration_months: "", pricing_type: "fixed", budget_amount: "", description: "" };
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const EMPTY_FORM = { location: "", truck_category: "", start_date: "", end_date: "", pricing_type: "fixed", budget_amount: "", description: "" };
 
 // A standalone lead-capture form — deliberately NOT part of the booking wizard. Submitting just
 // records an enquiry for the admin team to follow up on manually; nothing here matches it to a
@@ -24,12 +27,15 @@ export default function MonthlyHiringForm() {
 
   const handleSubmit = async () => {
     if (!form.location.trim()) return toast.error("Please tell us where you need the vehicle");
+    if (!form.start_date || !form.end_date) return toast.error("Please select both a start and end date");
+    if (new Date(form.end_date) <= new Date(form.start_date)) return toast.error("End date must be after the start date");
     setSubmitting(true);
     try {
       const res = await api.post("/api/monthly-hiring/enquiries", {
         location: form.location.trim(),
         truck_category: form.truck_category || undefined,
-        duration_months: form.duration_months ? Number(form.duration_months) : undefined,
+        start_date: form.start_date,
+        end_date: form.end_date,
         pricing_type: form.pricing_type,
         budget_amount: form.budget_amount ? Number(form.budget_amount) : undefined,
         description: form.description.trim() || undefined,
@@ -73,7 +79,7 @@ export default function MonthlyHiringForm() {
             />
           </div>
 
-          <div>
+          <div className="md:col-span-2">
             <label className="flex items-center gap-1.5 text-xs font-semibold text-neutral-500 mb-1.5">
               <Truck className="w-3.5 h-3.5" /> Truck Category
             </label>
@@ -86,14 +92,26 @@ export default function MonthlyHiringForm() {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-neutral-500 mb-1.5 block">Duration (months)</label>
-            <input
-              type="number"
-              min="1"
-              value={form.duration_months}
-              onChange={(e) => setForm((f) => ({ ...f, duration_months: e.target.value }))}
-              placeholder="e.g. 3"
-              className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm text-neutral-700 placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-neutral-500 mb-1.5">
+              <CalendarDays className="w-3.5 h-3.5" /> Start Date
+            </label>
+            <DatePicker
+              value={form.start_date}
+              min={todayStr()}
+              placeholder="Select start date"
+              onChange={(v) => setForm((f) => ({ ...f, start_date: v, end_date: f.end_date && f.end_date <= v ? "" : f.end_date }))}
+            />
+          </div>
+
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-neutral-500 mb-1.5">
+              <CalendarDays className="w-3.5 h-3.5" /> End Date
+            </label>
+            <DatePicker
+              value={form.end_date}
+              min={form.start_date || todayStr()}
+              placeholder="Select end date"
+              onChange={(v) => setForm((f) => ({ ...f, end_date: v }))}
             />
           </div>
 

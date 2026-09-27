@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarClock, Plus, MapPin } from "lucide-react";
 import { api, getToken } from "../services/api";
+import { truckTypeLabel } from "../lib/truckTypes";
 
 const STATUS_LABEL = { open: "Open", contacted: "Contacted", closed: "Closed" };
 const STATUS_CLASS = {
@@ -94,8 +95,8 @@ export default function MonthlyHiring() {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-neutral-800 truncate">{e.location}</p>
                   <p className="text-xs text-neutral-400 mt-0.5">
-                    {e.truckCategory ? `${e.truckCategory.charAt(0).toUpperCase()}${e.truckCategory.slice(1)} truck · ` : ""}
-                    {e.durationMonths ? `${e.durationMonths} month${e.durationMonths === 1 ? "" : "s"} · ` : ""}
+                    {e.truckCategory ? `${truckTypeLabel(e.truckCategory)} · ` : ""}
+                    {e.startDate && e.endDate ? `${fmtDate(e.startDate)} – ${fmtDate(e.endDate)} · ` : ""}
                     {e.pricingType === "per_km" ? "Per KM" : "Fixed Rate"}
                     {e.budgetAmount != null ? ` · ₹${e.budgetAmount.toLocaleString("en-IN")}` : ""}
                   </p>
