@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Phone, Tag, Clock3, Truck, CheckCircle2, ChevronDown } from "lucide-react";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
@@ -36,6 +36,20 @@ export default function DriverOfferCard({ request, askingPrice, onChange }) {
   const isYourTurnToConfirm = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "respondent";
   const isWaitingOnThem = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "client";
   const canCounter = request.status === "pending" || request.status === "countered";
+
+  // The "Your offer was sent" panel (negotiate.stage === "sent") is local UI state, not derived
+  // from request.status — so once the driver actually replies (status moves off "pending", the
+  // state it's in right after the client's own counter goes through), it has to be cleared here.
+  // Without this the reply lands in `request` correctly but the card stays on "sent — this card
+  // updates automatically" with only a Back button, so a client who's gone a round or two with a
+  // driver never sees the new counter or its Accept/Counter/Decline buttons until they happen to
+  // click Back themselves. RequestDriver.jsx and ChooseBroker.jsx already do exactly this.
+  useEffect(() => {
+    if (negotiate?.stage === "sent" && request.status !== "pending") {
+      setNegotiate(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.status]);
 
   const openNegotiate = () => {
     const base = amount;
