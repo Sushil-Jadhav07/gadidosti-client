@@ -175,11 +175,11 @@ export default function Profile() {
         {/* Left — User Card */}
         <div className="lg:col-span-1 space-y-5">
           {/* Profile Card */}
-          <div className="bg-secondary rounded-2xl overflow-hidden relative">
+          <div className="bg-gradient-to-br from-primary to-primary-dark rounded-2xl overflow-hidden relative">
             {/* Glow */}
             <div
-              className="absolute top-0 right-0 w-48 h-48 pointer-events-none opacity-15"
-              style={{ background: "radial-gradient(circle, rgba(22,101,52,0.5) 0%, transparent 70%)" }}
+              className="absolute top-0 right-0 w-48 h-48 pointer-events-none opacity-20"
+              style={{ background: "radial-gradient(circle, rgba(23,216,107,0.6) 0%, transparent 70%)" }}
             />
 
             <div className="relative z-10 p-6 text-center">
