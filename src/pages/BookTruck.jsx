@@ -1230,42 +1230,48 @@ export default function BookTruck() {
                   two cities, not chosen here) */}
               {step === 1 && (
                 <div className="animate-page-enter">
-                  {/* Book Now / Book Later — when Later is picked, the backend defers the
-                      driver/broker broadcast until shortly before scheduledDateTime instead of
-                      firing it the moment this booking is created (see is_scheduled in
-                      handleConfirm above). */}
+                  {/* Three mutually-exclusive modes, not two independent toggles — Full Truck
+                      (the default — any size, picked on Step 3) vs Part Truck (shared capacity,
+                      no further size choice) vs Book Later (deliberately no sub-type: a
+                      scheduled booking is always a full truck, never part-load). Picking one
+                      always fully overrides whichever was active, including resetting
+                      truckType off 'part' when it's not the one chosen. */}
                   <div className="flex items-center gap-1 mb-4 bg-neutral-50 rounded-full p-1 w-fit">
                     <button
                       type="button"
-                      onClick={() => updateForm("bookingMode", "now")}
+                      onClick={() => {
+                        updateForm("bookingMode", "now");
+                        if (form.truckType === "part") updateForm("truckType", null);
+                      }}
                       className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                        form.bookingMode !== "later" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                        form.bookingMode !== "later" && form.truckType !== "part" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
                       }`}
                     >
-                      <Zap className="w-3.5 h-3.5" /> Book Now
+                      <Zap className="w-3.5 h-3.5" /> Full Truck
                     </button>
                     <button
                       type="button"
-                      onClick={() => updateForm("bookingMode", "later")}
+                      onClick={() => {
+                        updateForm("bookingMode", "now");
+                        updateForm("truckType", "part");
+                      }}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                        form.bookingMode !== "later" && form.truckType === "part" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                      }`}
+                    >
+                      <PackagePlus className="w-3.5 h-3.5" /> Part Truck
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateForm("bookingMode", "later");
+                        if (form.truckType === "part") updateForm("truckType", null);
+                      }}
                       className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                         form.bookingMode === "later" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
                       }`}
                     >
                       <CalendarClock className="w-3.5 h-3.5" /> Book Later
-                    </button>
-                    {/* Independent of Book Now/Book Later above (a part-load booking can still
-                        be scheduled) — this is a shortcut for the same thing Step 3's category
-                        grid used to offer as a "Part Truck" card (now removed from that grid).
-                        Picking a different category on Step 3 overrides this back to a normal
-                        truck the same way it always could. */}
-                    <button
-                      type="button"
-                      onClick={() => updateForm("truckType", "part")}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                        form.truckType === "part" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
-                      }`}
-                    >
-                      <PackagePlus className="w-3.5 h-3.5" /> Part Truck
                     </button>
                   </div>
 
