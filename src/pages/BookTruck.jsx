@@ -1253,6 +1253,20 @@ export default function BookTruck() {
                     >
                       <CalendarClock className="w-3.5 h-3.5" /> Book Later
                     </button>
+                    {/* Independent of Book Now/Book Later above (a part-load booking can still
+                        be scheduled) — this is a shortcut for the same thing Step 3's category
+                        grid used to offer as a "Part Truck" card (now removed from that grid).
+                        Picking a different category on Step 3 overrides this back to a normal
+                        truck the same way it always could. */}
+                    <button
+                      type="button"
+                      onClick={() => updateForm("truckType", "part")}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                        form.truckType === "part" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                      }`}
+                    >
+                      <PackagePlus className="w-3.5 h-3.5" /> Part Truck
+                    </button>
                   </div>
 
                   {form.bookingMode === "later" && (() => {
@@ -1724,7 +1738,9 @@ export default function BookTruck() {
 
                   <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Truck Category</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
-                    {truckOptions.map((t) => (
+                    {/* Part Truck is now picked via its own button at the top of Step 1, not
+                        from this size grid — it isn't a "size" the way the rest of these are. */}
+                    {truckOptions.filter((t) => t.id !== "part").map((t) => (
                       <button
                         key={t.id}
                         type="button"
