@@ -14,6 +14,16 @@ export const TRUCK_TYPES = [
   { value: "17ft", label: "17ft Truck", capacity: "4.5 Ton" },
   { value: "19ft", label: "19ft Truck", capacity: "6 Ton" },
   { value: "22ft", label: "22ft Truck", capacity: "7 Ton" },
+  { value: "32ft_sxl", label: "32ft SXL", capacity: "9 Ton" },
+  { value: "32ft_mxl", label: "32ft MXL", capacity: "18 Ton" },
+];
+
+// A truck's body structure — independent of its size category. Offered as a search filter
+// alongside the size picker (see BookTruck.jsx's TRUCK CATEGORY step) and set on a truck at
+// registration (broker-driver app). Mirrors gadidosti-backend's constants/truckTypes.js.
+export const TRUCK_BODY_TYPES = [
+  { value: "open", label: "Open Truck" },
+  { value: "closed", label: "Closed Truck" },
 ];
 
 export const truckTypeLabel = (value) => TRUCK_TYPES.find((t) => t.value === value)?.label || value;

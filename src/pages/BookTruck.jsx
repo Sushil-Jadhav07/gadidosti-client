@@ -6,6 +6,7 @@ import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, ArrowDown, MapPin, Package, Weight, Hash, ClipboardList, Zap,
   Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus, Crosshair, Radar, CalendarClock, Ruler, Phone,
+  PackageOpen, PackageCheck,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -18,7 +19,7 @@ import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
 import { store } from "../store/store";
-import { TRUCK_TYPES } from "../lib/truckTypes";
+import { TRUCK_TYPES, TRUCK_BODY_TYPES } from "../lib/truckTypes";
 import { setWizardState, clearWizardState } from "../store/bookingWizardSlice";
 import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps";
 
@@ -63,6 +64,10 @@ const INITIAL_FORM = {
   materialType: "",
   notes: "",
   truckType: null,
+  // Open vs closed truck body — an optional refinement on top of truckType (size), not a
+  // requirement to continue. Passed through to both the booking payload (truck_body_type) and
+  // the Find Truck match on the backend; a client who doesn't care leaves it null.
+  truckBodyType: null,
   // Express Delivery — intra-city only (see the toggle in Step 3). Force-reset to false
   // whenever transportType isn't "intra" (see the effect right after transportType is
   // derived below), since sending is_express: true alongside transport_type: "inter" 422s.
@@ -822,6 +827,7 @@ export default function BookTruck() {
         is_express: form.transportType === "intra" ? form.isExpress : false,
         truck_type: selectedTruck?.name,
         truck_category: form.truckType,
+        truck_body_type: form.truckBodyType || undefined,
         weight: form.weight,
         weight_unit: "tons",
         quantity: form.quantity,
@@ -1704,6 +1710,29 @@ export default function BookTruck() {
                         <p className="text-[11px] text-neutral-400 truncate">{t.capacity}</p>
                       </button>
                     ))}
+                  </div>
+
+                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">
+                    Truck Structure <span className="normal-case font-normal text-neutral-300">(optional)</span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5 mb-6">
+                    {TRUCK_BODY_TYPES.map((b) => {
+                      const Icon = b.value === "open" ? PackageOpen : PackageCheck;
+                      const active = form.truckBodyType === b.value;
+                      return (
+                        <button
+                          key={b.value}
+                          type="button"
+                          onClick={() => updateForm("truckBodyType", active ? null : b.value)}
+                          className={`p-3 rounded-xl border-2 text-left transition-all ${
+                            active ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                          }`}
+                        >
+                          <Icon className={`w-5 h-5 mb-2 ${active ? "text-primary" : "text-neutral-400"}`} />
+                          <p className="text-sm font-semibold text-neutral-800 truncate">{b.label}</p>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Express Delivery — intra-city only (see is_express in the price-quote effect

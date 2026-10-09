@@ -13,6 +13,8 @@ export const TRUCK_IMAGES = {
   "17ft": "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
   "19ft": "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
   "22ft": "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
+  "32ft_sxl": "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
+  "32ft_mxl": "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
   small: "/truck/109_ICON_WITHOUT_DIMENSIONS.png",
   medium: "/truck/Tata_407_deselected.png",
   large: "/truck/2161_ICON_WITHOUT_DIMENSIONS.png",
