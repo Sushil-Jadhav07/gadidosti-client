@@ -762,6 +762,28 @@ export default function BookTruck() {
       toast.error("Price quote isn't ready yet — please wait a moment and try again.");
       return;
     }
+    // priceBreakdown.total being non-zero isn't enough on its own — it can be a STALE quote
+    // left over from before pickup/drop were fully set, or from a different truck category
+    // (e.g. a small truck's minimumFare), that the quote effect hasn't caught up and replaced
+    // yet. That's exactly how a real bug got through: a 'part' booking got created with
+    // distance 0 and a non-zero amount carried over from an earlier, unrelated quote — the
+    // nearby-on-trip search then had nothing valid to search with and silently found nothing.
+    // Compare against a freshly-derived distance rather than trusting priceBreakdown.distance —
+    // a real mismatch means the quote hasn't caught up with the current form yet, so block and
+    // let the existing quote-refresh effect (watching pickup/drop/truckType/etc.) catch up,
+    // rather than silently submitting a price that no longer matches the actual route.
+    const freshDistance = chainDistanceKm({
+      pickupLat: form.pickupLat, pickupLng: form.pickupLng, dropLat: form.dropLat, dropLng: form.dropLng,
+      loadingLocations: form.loadingLocations, unloadingLocations: form.unloadingLocations,
+    });
+    if (!freshDistance || freshDistance <= 0) {
+      toast.error("Couldn't confirm your route — please re-check your pickup and drop locations.");
+      return;
+    }
+    if (Math.abs(freshDistance - (priceBreakdown.distance || 0)) > 1) {
+      toast.error("Your price quote is out of date — recalculating, please tap Confirm again in a moment.");
+      return;
+    }
     if (!scheduledDateTimeValid) {
       toast.error("Please choose a future date and time for your scheduled booking.");
       return;

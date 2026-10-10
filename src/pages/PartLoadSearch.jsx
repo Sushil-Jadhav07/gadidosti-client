@@ -50,14 +50,14 @@ export default function PartLoadSearch({ bookingId, bookingNumber, pickup, picku
   const [phase, setPhase] = useState("candidates");
   const [candidates, setCandidates] = useState([]);
   const [loadingCandidates, setLoadingCandidates] = useState(true);
-  const [candidatesError, setCandidatesError] = useState(false);
+  const [candidatesError, setCandidatesError] = useState(null);
   const [requestingId, setRequestingId] = useState(null);
   const [joinRequest, setJoinRequest] = useState(null);
   const pollRef = useRef(null);
 
   const fetchCandidates = async () => {
     setLoadingCandidates(true);
-    setCandidatesError(false);
+    setCandidatesError(null);
     try {
       const qs = new URLSearchParams({
         pickup_lat: pickupLat, pickup_lng: pickupLng, drop_lat: dropLat, drop_lng: dropLng, weight_tons: weightTons,
@@ -65,8 +65,12 @@ export default function PartLoadSearch({ bookingId, bookingNumber, pickup, picku
       const res = await api.get(`/api/vehicles/trucks/nearby-on-trip?${qs}`, token);
       if (!res?.success) throw new Error(res?.message || "Failed to search for trucks");
       setCandidates(res.data?.trucks || []);
-    } catch {
-      setCandidatesError(true);
+    } catch (err) {
+      // The real reason (e.g. a validation message) is far more useful here than a generic
+      // "something went wrong" — this search has real required inputs (weight, both
+      // coordinates), and a silently generic error here is what made an earlier real bug (a
+      // booking created without a weight) look like nothing was happening at all.
+      setCandidatesError(err?.message || "Failed to search for trucks");
     } finally {
       setLoadingCandidates(false);
     }
@@ -217,7 +221,7 @@ export default function PartLoadSearch({ bookingId, bookingNumber, pickup, picku
                   </div>
                 ) : candidatesError ? (
                   <div className="bg-red-50 rounded-xl p-4 text-sm text-danger flex items-center gap-2">
-                    <span>Couldn't load nearby trucks.</span>
+                    <span>{candidatesError}</span>
                     <button onClick={fetchCandidates} className="underline">Retry</button>
                   </div>
                 ) : candidates.length === 0 ? (
