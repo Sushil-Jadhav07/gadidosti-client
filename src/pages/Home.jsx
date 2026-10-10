@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Truck, AlertTriangle, Receipt, Package, CheckCircle2, SlidersHorizontal,
-  RefreshCw, MapPin, Headphones, Download, Eye, ArrowRight,
+  RefreshCw, MapPin, Headphones, Download, Eye, ArrowRight, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import RowMenu from "../components/RowMenu";
@@ -71,6 +71,10 @@ export default function Home() {
   const [downloadingId, setDownloadingId] = useState(null);
   const [liveTrucks, setLiveTrucks] = useState([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  // Which of liveTrucks the map/OTP panel is currently showing — reset whenever the live list
+  // itself changes shape (a shipment got delivered and dropped out, a new one started), rather
+  // than silently pointing at a now-stale index.
+  const [activeLiveIndex, setActiveLiveIndex] = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -125,18 +129,36 @@ export default function Home() {
             category: b.truckCategory,
             hasIncident: !!data.incident,
             status: b.status,
+            bookingNumber: bookingRef(b),
+            pickup: b.pickup,
+            drop: b.drop,
+            // Pickup verification code — same source TrackShipment.jsx reads, surfaced here too
+            // so a client glancing at the dashboard doesn't have to open Track Shipment just to
+            // read a code off to the driver.
+            pickupOtp: data.pickupOtp,
+            pickupOtpVerified: !!data.pickupOtpVerified,
           };
         } catch {
           return null;
         }
       })
     ).then((results) => {
-      if (!cancelled) setLiveTrucks(results.filter(Boolean));
+      if (!cancelled) {
+        setLiveTrucks(results.filter(Boolean));
+        setActiveLiveIndex(0);
+      }
     }).finally(() => {
       if (!cancelled) setLiveLoading(false);
     });
     return () => { cancelled = true; };
   }, [bookings, token]);
+
+  // Clamp rather than reset on every liveTrucks change once it's already showing — a shipment
+  // further down the list being dropped shouldn't yank the client back to index 0 away from
+  // whichever one they were actually looking at, unless that one's gone too.
+  useEffect(() => {
+    setActiveLiveIndex((i) => Math.min(i, Math.max(0, liveTrucks.length - 1)));
+  }, [liveTrucks.length]);
 
   const movingCount = liveTrucks.filter((t) => !t.hasIncident && ["En Route", "Picked Up", "In Transit"].includes(t.status)).length;
   const idleCount = liveTrucks.filter((t) => !t.hasIncident && t.status === "Assigned").length;
@@ -299,6 +321,59 @@ export default function Home() {
                   <span className="flex items-center gap-1.5 text-xs text-neutral-500"><span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" /> Idle ({idleCount})</span>
                   <span className="flex items-center gap-1.5 text-xs text-neutral-500"><span className="w-2 h-2 rounded-full bg-danger flex-shrink-0" /> Delayed ({delayedCount})</span>
                 </div>
+              )}
+
+              {/* Which live shipment the OTP box below is showing — only shown once there's
+                  actually more than one to switch between (a single shipment has nothing to
+                  scroll to), same chevron + dots pattern as TrackShipment.jsx's own multi-trip
+                  nav so this reads as the same control everywhere it appears. */}
+              {liveTrucks.length > 1 && (
+                <div className="px-5 pt-3 flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveLiveIndex((i) => Math.max(0, i - 1))}
+                    disabled={activeLiveIndex === 0}
+                    className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-neutral-50 text-neutral-500 hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label="Previous shipment"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="flex-1 flex items-center justify-center gap-1.5">
+                    {liveTrucks.map((t, i) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setActiveLiveIndex(i)}
+                        className={`h-1.5 rounded-full transition-all ${i === activeLiveIndex ? "w-5 bg-primary" : "w-1.5 bg-neutral-200 hover:bg-neutral-300"}`}
+                        aria-label={`Shipment ${i + 1} of ${liveTrucks.length}`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-[11px] font-medium text-neutral-400 flex-shrink-0 tabular-nums">{activeLiveIndex + 1} / {liveTrucks.length}</span>
+                  <button
+                    onClick={() => setActiveLiveIndex((i) => Math.min(liveTrucks.length - 1, i + 1))}
+                    disabled={activeLiveIndex === liveTrucks.length - 1}
+                    className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-neutral-50 text-neutral-500 hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label="Next shipment"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Pickup verification code for whichever shipment the nav above is pointed at —
+                  same source/condition as TrackShipment.jsx's own OTP banner (unverified pickup
+                  code only), surfaced here too so a client doesn't have to leave the dashboard
+                  just to read a code off to the driver. */}
+              {liveTrucks[activeLiveIndex]?.pickupOtp && !liveTrucks[activeLiveIndex].pickupOtpVerified && (
+                <button
+                  onClick={() => navigate(`/bookings/${liveTrucks[activeLiveIndex].id}`)}
+                  className="mx-5 mt-3 bg-primary-50 border border-primary/20 rounded-lg px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-primary-50/80 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold text-primary uppercase tracking-wide">Pickup Code — {liveTrucks[activeLiveIndex].bookingNumber}</p>
+                    <p className="text-[11px] text-neutral-500 truncate">{liveTrucks[activeLiveIndex].pickup} → {liveTrucks[activeLiveIndex].drop}</p>
+                  </div>
+                  <p className="font-poppins font-bold text-xl text-primary tracking-[0.2em] flex-shrink-0">{liveTrucks[activeLiveIndex].pickupOtp}</p>
+                </button>
               )}
 
               <div className="flex-1 min-h-[260px] p-3">

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, ArrowRight, Check, Download, Mail, XCircle, Truck, Copy, User, Building2,
   Navigation, Ruler, AlertTriangle, RefreshCw, CreditCard, Star, Camera, Handshake, Phone, Tag, Clock3, Share2, MapPin, Link2, Zap, CalendarClock,
+  ChevronLeft, ChevronRight, CheckCircle2,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import PaymentSheet from "../components/PaymentSheet";
@@ -85,6 +86,42 @@ export default function BookingDetail() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Pickup verification code — same source TrackShipment.jsx reads (GET /api/bookings/:id/track),
+  // not part of the plain booking projection above. Only fetched while the booking's actually
+  // live (no OTP exists before a driver's assigned, and it stops mattering once delivered);
+  // re-runs whenever loadBooking's trip-status socket handler above changes booking.status, so a
+  // code that just got verified disappears without needing a manual refresh.
+  const [otpInfo, setOtpInfo] = useState(null);
+  useEffect(() => {
+    if (!booking?.id || !LIVE_STATUSES.includes(booking.status)) {
+      setOtpInfo(null);
+      return;
+    }
+    let cancelled = false;
+    api.get(`/api/bookings/${booking.id}/track`, token)
+      .then((res) => {
+        if (cancelled || !res?.success) return;
+        setOtpInfo({ pickupOtp: res.data?.pickupOtp, pickupOtpVerified: !!res.data?.pickupOtpVerified });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [booking?.id, booking?.status, token]);
+
+  // Prev/next between bookings without going back to the list — same order /api/bookings?limit=
+  // already returns (newest first), fetched once and reused for the whole session on this page
+  // rather than re-fetched per navigation.
+  const [siblingIds, setSiblingIds] = useState([]);
+  useEffect(() => {
+    api.get("/api/bookings?limit=100", token)
+      .then((res) => {
+        if (!res?.success) return;
+        const list = res.data?.bookings || res.data || [];
+        setSiblingIds(list.map((b) => b.id));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   // Live push — the moment the driver/broker changes the trip's status (picked up, delivered,
   // etc.), silently re-fetch this booking so the status badge/timeline update instantly instead
@@ -291,6 +328,10 @@ export default function BookingDetail() {
   const hasPickupCoords = booking.pickupLat != null && booking.pickupLng != null;
   const hasDropCoords = booking.dropLat != null && booking.dropLng != null;
 
+  const siblingIndex = siblingIds.indexOf(booking.id);
+  const prevBookingId = siblingIndex > 0 ? siblingIds[siblingIndex - 1] : null;
+  const nextBookingId = siblingIndex >= 0 && siblingIndex < siblingIds.length - 1 ? siblingIds[siblingIndex + 1] : null;
+
   return (
     <div className="p-4 md:p-8 animate-page-enter">
       {/* Back header */}
@@ -305,6 +346,27 @@ export default function BookingDetail() {
           <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Booking Details</h1>
           <button onClick={copyId} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-600 transition-colors">
             {bookingRef(booking)} <Copy className="w-3 h-3" />
+          </button>
+        </div>
+        {/* Prev/next through the client's own booking list (same order My Bookings shows) —
+            so switching to the adjacent booking doesn't mean going back to the list and
+            re-opening the next row every time. */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => prevBookingId && navigate(`/bookings/${prevBookingId}`)}
+            disabled={!prevBookingId}
+            title="Previous booking"
+            className="w-9 h-9 flex items-center justify-center rounded-lg bg-white shadow-card text-neutral-500 hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => nextBookingId && navigate(`/bookings/${nextBookingId}`)}
+            disabled={!nextBookingId}
+            title="Next booking"
+            className="w-9 h-9 flex items-center justify-center rounded-lg bg-white shadow-card text-neutral-500 hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
+            <ChevronRight className="w-5 h-5" />
           </button>
         </div>
       </div>
@@ -372,6 +434,25 @@ export default function BookingDetail() {
                 </div>
               )}
             </div>
+
+            {/* Pickup verification code — shown persistently, not behind a reveal, same as
+                TrackShipment.jsx's own OTP banner: the client reads this out to the driver on
+                arrival, so it should never require digging for. Doesn't expire on its own. */}
+            {otpInfo?.pickupOtp && !otpInfo.pickupOtpVerified && (
+              <div className="bg-primary-50 border border-primary/20 rounded-xl p-4 mb-5 flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1">Pickup Code</p>
+                  <p className="text-sm text-neutral-600">Share this with your driver when they arrive to confirm pickup.</p>
+                </div>
+                <p className="font-poppins font-bold text-3xl text-primary tracking-[0.2em]">{otpInfo.pickupOtp}</p>
+              </div>
+            )}
+            {otpInfo?.pickupOtpVerified && (
+              <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-5 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                <p className="text-sm text-neutral-600">Pickup verified with your code.</p>
+              </div>
+            )}
 
             {/* Horizontal Status Timeline */}
             <div className="mb-5">
