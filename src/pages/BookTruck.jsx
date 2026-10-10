@@ -434,6 +434,22 @@ export default function BookTruck() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.transportType]);
 
+  // Part Truck only ever searches via "Find Truck" (see Step 3's locked panel below, which
+  // skips the Find Truck/Search Broker toggle entirely for this category) — enforced here too,
+  // not just in the Step 1 button's onClick, so a stale draft restored from sessionStorage (or
+  // any other path that lands on truckType 'part' without having gone through that button)
+  // can't get stuck on Step 3 with no searchMode and no visible way to set one.
+  useEffect(() => {
+    if (form.truckType === "part" && form.searchMode !== "truck") {
+      updateForm("searchMode", "truck");
+      if (form.selectedBrokerId) {
+        updateForm("selectedBrokerId", null);
+        updateForm("selectedBrokerName", null);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.truckType]);
+
   // Reverse-geocodes the browser's GPS position into a street address for the Pickup field —
   // uses google.maps.Geocoder (the Geocoding API, a separate Google product from Places, not
   // part of the AutocompleteService/PlacesService deprecation PlacesAutocompleteInput works
@@ -1276,6 +1292,14 @@ export default function BookTruck() {
                       onClick={() => {
                         updateForm("bookingMode", "now");
                         updateForm("truckType", "part");
+                        // Part Truck has exactly one way to find a truck — searching nearby
+                        // on-trip trucks with spare capacity (see PartLoadSearch.jsx). Force it
+                        // here rather than leaving Step 3's Find Truck/Search Broker toggle up
+                        // for grabs — "Search for Broker" has no matching backend for category
+                        // 'part' at all, so letting it be selected would silently go nowhere.
+                        updateForm("searchMode", "truck");
+                        updateForm("selectedBrokerId", null);
+                        updateForm("selectedBrokerName", null);
                       }}
                       className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                         form.bookingMode !== "later" && form.truckType === "part" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
@@ -1764,154 +1788,180 @@ export default function BookTruck() {
                   <h2 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800 mb-1">Find your truck</h2>
                   <p className="text-sm text-neutral-400 mb-4">Pick a truck category, then choose how we should find you one.</p>
 
-                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Truck Category</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
-                    {/* Part Truck is now picked via its own button at the top of Step 1, not
-                        from this size grid — it isn't a "size" the way the rest of these are. */}
-                    {truckOptions.filter((t) => t.id !== "part").map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => updateForm("truckType", t.id)}
-                        className={`p-3 rounded-xl border-2 text-left transition-all ${
-                          form.truckType === t.id ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
-                        }`}
-                      >
-                        <Truck className={`w-5 h-5 mb-2 ${form.truckType === t.id ? "text-primary" : "text-neutral-400"}`} />
-                        <p className="text-sm font-semibold text-neutral-800 truncate">{t.name}</p>
-                        <p className="text-[11px] text-neutral-400 truncate">{t.capacity}</p>
-                      </button>
-                    ))}
-                  </div>
-
-                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">
-                    Truck Structure <span className="normal-case font-normal text-neutral-300">(optional)</span>
-                  </p>
-                  <div className="grid grid-cols-2 gap-2.5 mb-6">
-                    {TRUCK_BODY_TYPES.map((b) => {
-                      const Icon = b.value === "open" ? PackageOpen : PackageCheck;
-                      const active = form.truckBodyType === b.value;
-                      return (
-                        <button
-                          key={b.value}
-                          type="button"
-                          onClick={() => updateForm("truckBodyType", active ? null : b.value)}
-                          className={`p-3 rounded-xl border-2 text-left transition-all ${
-                            active ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
-                          }`}
-                        >
-                          <Icon className={`w-5 h-5 mb-2 ${active ? "text-primary" : "text-neutral-400"}`} />
-                          <p className="text-sm font-semibold text-neutral-800 truncate">{b.label}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Express Delivery — intra-city only (see is_express in the price-quote effect
-                      and handleConfirm above; sending it for an Inter-City trip 422s), so this
-                      is hidden entirely rather than just disabled once the trip is Inter-City.
-                      The surcharge/expected-delivery figures only ever come from a live quote —
-                      never hardcoded — so they only appear once the toggle is on and a fresh
-                      quote (with is_express: true) has actually come back. */}
-                  {form.transportType === "intra" && (
-                    <div className={`flex items-start justify-between gap-3 border rounded-xl p-4 mb-6 transition-colors ${
-                      form.isExpress ? "border-primary/30 bg-primary-50" : "border-neutral-100"
-                    }`}>
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          form.isExpress ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"
-                        }`}>
-                          <Zap className="w-4.5 h-4.5" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="font-poppins font-semibold text-sm text-neutral-800">Express Delivery</p>
-                          <p className="text-xs text-neutral-400 mt-0.5">
-                            Get a tighter delivery deadline, for an added surcharge on top of the fare below.
-                          </p>
-                          {form.isExpress && (
-                            loadingQuote ? (
-                              <p className="text-[11px] text-neutral-400 mt-1.5">Calculating surcharge...</p>
-                            ) : priceBreakdown?.isExpress ? (
-                              <div className="mt-1.5">
-                                <p className="text-[11px] font-semibold text-primary">
-                                  +₹{Number(priceBreakdown.expressSurcharge).toLocaleString("en-IN")} surcharge
-                                  {priceBreakdown.expectedDeliveryHours != null && ` · expected delivery in ~${priceBreakdown.expectedDeliveryHours}h`}
-                                </p>
-                                {priceBreakdown.expressInsuranceIncluded && (
-                                  <p className="text-[11px] text-neutral-400 mt-0.5">Includes transit insurance</p>
-                                )}
-                              </div>
-                            ) : priceBreakdown && form.truckType === "part" ? (
-                              // The only way the toggle can be on here yet the quote still come
-                              // back with isExpress: false — see pricing.model.js's expressActive
-                              // (transportType !== 'inter' is already guaranteed by the outer
-                              // `form.transportType === "intra"` check above, so truck_category
-                              // 'part' is the only remaining silent-failure case). Used to just
-                              // render nothing here, which is exactly what made this look like
-                              // "Express isn't working" for a route that worked fine last time —
-                              // only the truck type picked this time was different.
-                              <p className="text-[11px] font-semibold text-amber-600 mt-1.5">
-                                Express Delivery isn't available for Part Load — pick a different truck type to use it.
-                              </p>
-                            ) : null
-                          )}
-                        </div>
+                  {form.truckType === "part" ? (
+                    // Part Truck has no size to pick — it's shared space on an already-moving
+                    // truck, matched by spare capacity, not by a category grid. Showing the
+                    // normal grid here let a client tap a size card (e.g. "32ft SXL") and
+                    // silently overwrite truckType off 'part', turning this into an ordinary
+                    // Full Truck booking with no indication anything changed — exactly the "it
+                    // mixed with another functionality" bug. Locked, non-interactive instead.
+                    <div className="flex items-center gap-2.5 border-2 border-primary bg-primary-50 rounded-xl p-3 mb-6">
+                      <span className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0">
+                        <PackagePlus className="w-4.5 h-4.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-neutral-800">Part Truck</p>
+                        <p className="text-[11px] text-neutral-500">Shared capacity on an already-moving truck — no size to pick.</p>
                       </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={form.isExpress}
-                        onClick={() => updateForm("isExpress", !form.isExpress)}
-                        className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors ${form.isExpress ? "bg-primary" : "bg-neutral-200"}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.isExpress ? "translate-x-5" : ""}`} />
-                      </button>
                     </div>
+                  ) : (
+                    <>
+                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Truck Category</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
+                        {/* Part Truck is picked via its own button at the top of Step 1, not
+                            from this size grid — it isn't a "size" the way the rest of these are. */}
+                        {truckOptions.filter((t) => t.id !== "part").map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => updateForm("truckType", t.id)}
+                            className={`p-3 rounded-xl border-2 text-left transition-all ${
+                              form.truckType === t.id ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                            }`}
+                          >
+                            <Truck className={`w-5 h-5 mb-2 ${form.truckType === t.id ? "text-primary" : "text-neutral-400"}`} />
+                            <p className="text-sm font-semibold text-neutral-800 truncate">{t.name}</p>
+                            <p className="text-[11px] text-neutral-400 truncate">{t.capacity}</p>
+                          </button>
+                        ))}
+                      </div>
+
+                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">
+                        Truck Structure <span className="normal-case font-normal text-neutral-300">(optional)</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-2.5 mb-6">
+                        {TRUCK_BODY_TYPES.map((b) => {
+                          const Icon = b.value === "open" ? PackageOpen : PackageCheck;
+                          const active = form.truckBodyType === b.value;
+                          return (
+                            <button
+                              key={b.value}
+                              type="button"
+                              onClick={() => updateForm("truckBodyType", active ? null : b.value)}
+                              className={`p-3 rounded-xl border-2 text-left transition-all ${
+                                active ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                              }`}
+                            >
+                              <Icon className={`w-5 h-5 mb-2 ${active ? "text-primary" : "text-neutral-400"}`} />
+                              <p className="text-sm font-semibold text-neutral-800 truncate">{b.label}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Express Delivery — intra-city only (see is_express in the price-quote
+                          effect and handleConfirm above; sending it for an Inter-City trip
+                          422s), so this is hidden entirely rather than just disabled once the
+                          trip is Inter-City. The surcharge/expected-delivery figures only ever
+                          come from a live quote — never hardcoded — so they only appear once the
+                          toggle is on and a fresh quote (with is_express: true) has actually
+                          come back. Not shown at all for Part Truck — it's never available for
+                          that category (see pricing.model.js's expressActive). */}
+                      {form.transportType === "intra" && (
+                        <div className={`flex items-start justify-between gap-3 border rounded-xl p-4 mb-6 transition-colors ${
+                          form.isExpress ? "border-primary/30 bg-primary-50" : "border-neutral-100"
+                        }`}>
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              form.isExpress ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"
+                            }`}>
+                              <Zap className="w-4.5 h-4.5" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-poppins font-semibold text-sm text-neutral-800">Express Delivery</p>
+                              <p className="text-xs text-neutral-400 mt-0.5">
+                                Get a tighter delivery deadline, for an added surcharge on top of the fare below.
+                              </p>
+                              {form.isExpress && (
+                                loadingQuote ? (
+                                  <p className="text-[11px] text-neutral-400 mt-1.5">Calculating surcharge...</p>
+                                ) : priceBreakdown?.isExpress ? (
+                                  <div className="mt-1.5">
+                                    <p className="text-[11px] font-semibold text-primary">
+                                      +₹{Number(priceBreakdown.expressSurcharge).toLocaleString("en-IN")} surcharge
+                                      {priceBreakdown.expectedDeliveryHours != null && ` · expected delivery in ~${priceBreakdown.expectedDeliveryHours}h`}
+                                    </p>
+                                    {priceBreakdown.expressInsuranceIncluded && (
+                                      <p className="text-[11px] text-neutral-400 mt-0.5">Includes transit insurance</p>
+                                    )}
+                                  </div>
+                                ) : null
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={form.isExpress}
+                            onClick={() => updateForm("isExpress", !form.isExpress)}
+                            className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors ${form.isExpress ? "bg-primary" : "bg-neutral-200"}`}
+                          >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.isExpress ? "translate-x-5" : ""}`} />
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Find Truck (fan-out broadcast to every nearby driver) vs Search for Broker
                       (send to exactly one broker) — mutually exclusive: picking one clears the
                       other's own fields (radius / selected broker) so there's no stale leftover
-                      state from a mode the client isn't using anymore. Same choice for every
-                      category including Part Truck — "Find Truck" is what triggers part-load
-                      matching for that category specifically (see handleConfirm, which maps it
-                      to search_mode 'part_load' on submit rather than 'truck'). */}
-                  <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">How should we find your truck?</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                    <button
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, searchMode: "truck", selectedBrokerId: null, selectedBrokerName: null }))}
-                      className={`text-left p-4 rounded-xl border-2 transition-all ${
-                        form.searchMode === "truck" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 mb-1.5">
-                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "truck" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
-                          <Radar className="w-4.5 h-4.5" />
-                        </span>
-                        <p className="font-poppins font-semibold text-sm text-neutral-800">Find Truck</p>
+                      state from a mode the client isn't using anymore. Not offered at all for
+                      Part Truck — "Search for Broker" has no matching backend for category
+                      'part' (no truck is ever registered under it directly), so Part Truck is
+                      forced onto the one path that actually works: a nearby-on-trip search,
+                      triggered the same way "Find Truck" is for every other category (see
+                      handleConfirm, which maps it to search_mode 'part_load' on submit). */}
+                  {form.truckType === "part" ? (
+                    <div className="flex items-center gap-2.5 border border-neutral-100 rounded-xl p-4 mb-4">
+                      <span className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0">
+                        <Radar className="w-4.5 h-4.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-poppins font-semibold text-sm text-neutral-800">Find a truck to share</p>
+                        <p className="text-xs text-neutral-400">We'll search for an on-trip truck heading your way with spare capacity.</p>
                       </div>
-                      <p className="text-xs text-neutral-400">We notify every available driver nearby — first to accept gets the job.</p>
-                    </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">How should we find your truck?</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                        <button
+                          type="button"
+                          onClick={() => setForm((prev) => ({ ...prev, searchMode: "truck", selectedBrokerId: null, selectedBrokerName: null }))}
+                          className={`text-left p-4 rounded-xl border-2 transition-all ${
+                            form.searchMode === "truck" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 mb-1.5">
+                            <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "truck" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
+                              <Radar className="w-4.5 h-4.5" />
+                            </span>
+                            <p className="font-poppins font-semibold text-sm text-neutral-800">Find Truck</p>
+                          </div>
+                          <p className="text-xs text-neutral-400">We notify every available driver nearby — first to accept gets the job.</p>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, searchMode: "broker" }))}
-                      className={`text-left p-4 rounded-xl border-2 transition-all ${
-                        form.searchMode === "broker" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 mb-1.5">
-                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "broker" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
-                          <Building2 className="w-4.5 h-4.5" />
-                        </span>
-                        <p className="font-poppins font-semibold text-sm text-neutral-800">Search for Broker</p>
+                        <button
+                          type="button"
+                          onClick={() => setForm((prev) => ({ ...prev, searchMode: "broker" }))}
+                          className={`text-left p-4 rounded-xl border-2 transition-all ${
+                            form.searchMode === "broker" ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 mb-1.5">
+                            <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${form.searchMode === "broker" ? "bg-primary text-white" : "bg-neutral-100 text-neutral-400"}`}>
+                              <Building2 className="w-4.5 h-4.5" />
+                            </span>
+                            <p className="font-poppins font-semibold text-sm text-neutral-800">Search for Broker</p>
+                          </div>
+                          <p className="text-xs text-neutral-400">Pick one broker yourself — the request goes only to them.</p>
+                        </button>
                       </div>
-                      <p className="text-xs text-neutral-400">Pick one broker yourself — the request goes only to them.</p>
-                    </button>
-                  </div>
+                    </>
+                  )}
 
-                  {form.searchMode === "truck" && (
+                  {(form.searchMode === "truck" || form.truckType === "part") && (
                     <div className="border border-neutral-100 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wide flex items-center gap-1.5">
