@@ -15,7 +15,6 @@ import TimePicker from "../components/TimePicker";
 import MapView from "../components/MapView";
 import ChooseBroker from "./ChooseBroker";
 import FindTruckSearch from "./FindTruckSearch";
-import PartLoadSearch from "./PartLoadSearch";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
@@ -308,7 +307,6 @@ export default function BookTruck() {
           drop: booking.drop,
           dropLat: booking.dropLat,
           dropLng: booking.dropLng,
-          weightTons: booking.weight,
           isScheduled: !!booking.isScheduled,
           scheduledDate: booking.date || null,
           searchMode: booking.searchMode || null,
@@ -884,12 +882,11 @@ export default function BookTruck() {
         payment_status: "pending",
         add_loading_location: loadingLocations,
         add_unloading_location: unloadingLocations,
-        // "Find Truck" + Part Truck is what actually triggers part-load matching (see
-        // PartLoadSearch.jsx, rendered as Step 5 whenever the booking comes back with
-        // searchMode 'part_load') — the UI choice itself stays identical to every other
-        // category (Radar button labeled "Find Truck"), only the value sent to the backend
-        // differs for this one category, since broadcastBooking() deliberately no-ops for
-        // 'truck' + category 'part' (no truck is ever registered under it).
+        // Part Truck always goes through the "Find Truck" UI (Step 3's locked panel forces
+        // form.searchMode to "truck") — only the value actually sent to the backend differs,
+        // so broadcastBooking() matches it against drivers who've toggled Part Truck mode
+        // (TruckModel.findPartTruckCandidates) instead of every available truck. Step 5 then
+        // renders the exact same FindTruckSearch negotiation screen either way.
         search_mode: form.truckType === "part" && form.searchMode === "truck" ? "part_load" : form.searchMode,
         ...(form.searchMode === "truck" ? { search_radius_km: form.searchRadiusKm } : {}),
         ...(form.searchMode === "broker" ? { broker_id: form.selectedBrokerId } : {}),
@@ -908,9 +905,6 @@ export default function BookTruck() {
         drop: form.drop,
         dropLat: booking?.dropLat ?? form.dropLat,
         dropLng: booking?.dropLng ?? form.dropLng,
-        // Part Truck only — weight_unit is always "tons" on this app (see the POST /api/bookings
-        // payload above), so form.weight is already the right unit for the nearby-on-trip search.
-        weightTons: form.weight,
         isScheduled: !!booking?.isScheduled,
         scheduledDate: booking?.date || (isScheduled ? form.scheduledDateTime : null),
         searchMode: booking?.searchMode || form.searchMode,
@@ -1216,20 +1210,7 @@ export default function BookTruck() {
           // shortly before scheduled_date (see scheduledBookingBroadcastSweep.js). No live
           // waiting/negotiate screen makes sense here since nothing will happen for a while.
           <ScheduledConfirmation booking={createdBooking} navigate={navigate} />
-        ) : step === 5 && createdBooking && createdBooking.searchMode === "part_load" ? (
-          <PartLoadSearch
-            bookingId={createdBooking.id}
-            bookingNumber={createdBooking.bookingNumber}
-            pickup={createdBooking.pickup}
-            pickupLat={createdBooking.pickupLat}
-            pickupLng={createdBooking.pickupLng}
-            drop={createdBooking.drop}
-            dropLat={createdBooking.dropLat}
-            dropLng={createdBooking.dropLng}
-            weightTons={createdBooking.weightTons}
-            onBack={() => setStep(4)}
-          />
-        ) : step === 5 && createdBooking && createdBooking.searchMode === "truck" ? (
+        ) : step === 5 && createdBooking && (createdBooking.searchMode === "truck" || createdBooking.searchMode === "part_load") ? (
           <FindTruckSearch
             bookingId={createdBooking.id}
             bookingNumber={createdBooking.bookingNumber}
@@ -1292,11 +1273,12 @@ export default function BookTruck() {
                       onClick={() => {
                         updateForm("bookingMode", "now");
                         updateForm("truckType", "part");
-                        // Part Truck has exactly one way to find a truck — searching nearby
-                        // on-trip trucks with spare capacity (see PartLoadSearch.jsx). Force it
-                        // here rather than leaving Step 3's Find Truck/Search Broker toggle up
-                        // for grabs — "Search for Broker" has no matching backend for category
-                        // 'part' at all, so letting it be selected would silently go nowhere.
+                        // Part Truck has exactly one way to find a truck — broadcasting to
+                        // drivers who've toggled their own truck into Part Truck mode (see
+                        // TruckModel.findPartTruckCandidates). Force it here rather than leaving
+                        // Step 3's Find Truck/Search Broker toggle up for grabs — "Search for
+                        // Broker" has no matching backend for category 'part' at all, so letting
+                        // it be selected would silently go nowhere.
                         updateForm("searchMode", "truck");
                         updateForm("selectedBrokerId", null);
                         updateForm("selectedBrokerName", null);
@@ -1909,9 +1891,11 @@ export default function BookTruck() {
                       state from a mode the client isn't using anymore. Not offered at all for
                       Part Truck — "Search for Broker" has no matching backend for category
                       'part' (no truck is ever registered under it directly), so Part Truck is
-                      forced onto the one path that actually works: a nearby-on-trip search,
-                      triggered the same way "Find Truck" is for every other category (see
-                      handleConfirm, which maps it to search_mode 'part_load' on submit). */}
+                      forced onto the one path that actually works: the same broadcast-to-nearby-
+                      drivers mechanism as "Find Truck", just matched against drivers who've
+                      toggled their own truck into Part Truck mode (see handleConfirm, which maps
+                      it to search_mode 'part_load' on submit, and backend TruckModel.
+                      findPartTruckCandidates). */}
                   {form.truckType === "part" ? (
                     <div className="flex items-center gap-2.5 border border-neutral-100 rounded-xl p-4 mb-4">
                       <span className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0">
