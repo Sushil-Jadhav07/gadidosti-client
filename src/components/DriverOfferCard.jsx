@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Phone, Tag, Clock3, Truck, CheckCircle2, ChevronDown } from "lucide-react";
+import { Phone, Tag, Clock3, Truck, CheckCircle2, ChevronDown, PackagePlus } from "lucide-react";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 
@@ -111,7 +111,17 @@ export default function DriverOfferCard({ request, askingPrice, onChange }) {
             <Truck className="w-4 h-4 text-primary" />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-neutral-800 truncate">{request.driverName || "Driver"}</p>
+            <p className="text-sm font-semibold text-neutral-800 truncate flex items-center gap-1.5">
+              {request.driverName || "Driver"}
+              {request.isPartLoad && (
+                <span
+                  className="inline-flex items-center gap-1 bg-teal-50 text-teal-700 text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                  title="Shared capacity — this truck may already be on another trip."
+                >
+                  <PackagePlus className="w-2.5 h-2.5" /> Part Truck
+                </span>
+              )}
+            </p>
             {(request.truckReg || request.driverPhone) && (
               <p className="text-[11px] text-neutral-400 truncate flex items-center gap-1">
                 {request.truckReg && <span>{request.truckReg}</span>}
@@ -129,6 +139,29 @@ export default function DriverOfferCard({ request, askingPrice, onChange }) {
           <Clock3 className="w-2.5 h-2.5" /> {meta.label}
         </span>
       </div>
+
+      {/* Capacity breakdown — only ever meaningful for Part Truck (capacity_tons is a part-load
+          concept), so this is hidden entirely for a normal Find Truck offer. spareTons already
+          excludes this booking's own weight (still unaccepted, so not yet "used") — it's the
+          room left over if the client picks this truck, not what's left after. */}
+      {request.isPartLoad && request.truckCapacityTons != null && (
+        <div className="grid grid-cols-3 gap-2 mb-3 bg-neutral-50 rounded-lg p-2.5">
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wide truncate">Your Load</p>
+            <p className="text-xs font-semibold text-neutral-700 truncate">{request.weight || "—"}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wide truncate">Truck Capacity</p>
+            <p className="text-xs font-semibold text-neutral-700 truncate">{request.truckCapacityTons} T</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wide truncate">Spare</p>
+            <p className="text-xs font-semibold text-primary truncate">
+              {request.truckSpareTons != null ? `${request.truckSpareTons} T` : "—"}
+            </p>
+          </div>
+        </div>
+      )}
 
       {negotiate?.stage === "set" ? (
         <>
