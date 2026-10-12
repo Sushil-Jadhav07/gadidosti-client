@@ -64,6 +64,10 @@ const INITIAL_FORM = {
   materialType: "",
   notes: "",
   truckType: null,
+  // Part Truck only — optional "only match this size" filter on top of the broadcast (see
+  // TruckModel.findPartTruckCandidates' category param on the backend). Null means any size.
+  // Independent of truckType, which stays "part" regardless of this value.
+  partTruckSizeFilter: null,
   // Open vs closed truck body — an optional refinement on top of truckType (size), not a
   // requirement to continue. Passed through to both the booking payload (truck_body_type) and
   // the Find Truck match on the backend; a client who doesn't care leaves it null.
@@ -444,6 +448,12 @@ export default function BookTruck() {
         updateForm("selectedBrokerId", null);
         updateForm("selectedBrokerName", null);
       }
+    }
+    // The preferred-size filter only ever means anything while actually in Part Truck mode —
+    // clear it the moment the client switches away, so a stale pick from an earlier Part Truck
+    // selection can't silently linger into an unrelated later booking.
+    if (form.truckType !== "part" && form.partTruckSizeFilter) {
+      updateForm("partTruckSizeFilter", null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.truckType]);
@@ -890,6 +900,10 @@ export default function BookTruck() {
         search_mode: form.truckType === "part" && form.searchMode === "truck" ? "part_load" : form.searchMode,
         ...(form.searchMode === "truck" ? { search_radius_km: form.searchRadiusKm } : {}),
         ...(form.searchMode === "broker" ? { broker_id: form.selectedBrokerId } : {}),
+        // Optional "only match this size" narrowing on top of the Part Truck broadcast — never
+        // changes truck_category above, which stays "part" regardless (see TruckModel.
+        // findPartTruckCandidates' category param on the backend).
+        ...(form.truckType === "part" && form.partTruckSizeFilter ? { part_truck_size_category: form.partTruckSizeFilter } : {}),
       }, token);
 
       if (!response?.success) throw new Error(response?.message || "Failed to confirm booking");
@@ -1771,21 +1785,45 @@ export default function BookTruck() {
                   <p className="text-sm text-neutral-400 mb-4">Pick a truck category, then choose how we should find you one.</p>
 
                   {form.truckType === "part" ? (
-                    // Part Truck has no size to pick — it's shared space on an already-moving
-                    // truck, matched by spare capacity, not by a category grid. Showing the
-                    // normal grid here let a client tap a size card (e.g. "32ft SXL") and
-                    // silently overwrite truckType off 'part', turning this into an ordinary
-                    // Full Truck booking with no indication anything changed — exactly the "it
-                    // mixed with another functionality" bug. Locked, non-interactive instead.
-                    <div className="flex items-center gap-2.5 border-2 border-primary bg-primary-50 rounded-xl p-3 mb-6">
-                      <span className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0">
-                        <PackagePlus className="w-4.5 h-4.5" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-neutral-800">Part Truck</p>
-                        <p className="text-[11px] text-neutral-500">Shared capacity on an already-moving truck — no size to pick.</p>
+                    <>
+                      {/* Confirmation banner, not a size grid itself — picking a size below is a
+                          FILTER on top of Part Truck (narrows which Part-Truck-toggled drivers
+                          get the request), it never overwrites truckType off 'part'. Keeping this
+                          separate from the grid's own selection state is what avoids the earlier
+                          "picking a size silently turns this into a Full Truck booking" bug. */}
+                      <div className="flex items-center gap-2.5 border-2 border-primary bg-primary-50 rounded-xl p-3 mb-4">
+                        <span className="w-9 h-9 rounded-lg bg-primary text-white flex items-center justify-center flex-shrink-0">
+                          <PackagePlus className="w-4.5 h-4.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-neutral-800">Part Truck</p>
+                          <p className="text-[11px] text-neutral-500">Shared capacity on a truck that may already be on a trip.</p>
+                        </div>
                       </div>
-                    </div>
+
+                      <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">
+                        Preferred Truck Size <span className="normal-case font-normal text-neutral-300">(optional — narrows who gets your request)</span>
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
+                        {truckOptions.filter((t) => t.id !== "part").map((t) => {
+                          const active = form.partTruckSizeFilter === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => updateForm("partTruckSizeFilter", active ? null : t.id)}
+                              className={`p-3 rounded-xl border-2 text-left transition-all ${
+                                active ? "border-primary bg-primary-50" : "border-neutral-100 hover:border-primary/30"
+                              }`}
+                            >
+                              <Truck className={`w-5 h-5 mb-2 ${active ? "text-primary" : "text-neutral-400"}`} />
+                              <p className="text-sm font-semibold text-neutral-800 truncate">{t.name}</p>
+                              <p className="text-[11px] text-neutral-400 truncate">{t.capacity}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   ) : (
                     <>
                       <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Truck Category</p>
@@ -2151,6 +2189,14 @@ export default function BookTruck() {
                             <span className="text-xs text-neutral-400">Capacity</span>
                             <span className="text-xs font-medium text-neutral-700 truncate">{truck?.capacity || "—"}</span>
                           </div>
+                          {form.truckType === "part" && form.partTruckSizeFilter && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-neutral-400">Preferred Size</span>
+                              <span className="text-xs font-medium text-neutral-700 truncate">
+                                {truckOptions.find((t) => t.id === form.partTruckSizeFilter)?.name || form.partTruckSizeFilter}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
