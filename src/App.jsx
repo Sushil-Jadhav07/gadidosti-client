@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
@@ -45,34 +45,35 @@ const PAGE_TITLES = {
 };
 
 function WebLayout({ children, hideTopBar }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const title = PAGE_TITLES[location.pathname]
     || (location.pathname.startsWith("/bookings/") ? "Booking Details"
       : location.pathname.startsWith("/chats/") ? "Chat"
       : "Dashboard");
 
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [location.pathname]);
-
   return (
-    <div className="flex min-h-screen bg-neutral">
-      {/* Mobile sidebar backdrop */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 md:hidden animate-fade-in"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    // min-h-dvh, not min-h-screen (100vh) — on a mobile browser, 100vh is sized against the
+    // LARGEST possible viewport (address bar collapsed), not what's actually visible when it's
+    // showing. That overshoot is exactly what pushed BottomNav (and the wizard's own h-screen
+    // frame below) a browser-chrome's-worth of pixels past the real bottom edge of the screen.
+    // dvh (dynamic viewport height, Tailwind 3.4+) tracks the actual visible viewport instead.
+    <div className="flex min-h-dvh bg-neutral">
+      {/* Desktop-only now (see Sidebar.jsx) — mobile navigation is BottomNav alone, not this
+          same list behind a hamburger/slide-in drawer. */}
+      <Sidebar />
 
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-
-      <div className={`flex-1 md:ml-64 flex flex-col overflow-hidden ${hideTopBar ? "h-screen" : "min-h-screen"}`}>
+      {/* overflow-hidden only on the hideTopBar (wizard) path, where it's a genuinely bounded
+          h-dvh frame with its own internal scroll (main below). On normal pages this div is
+          just min-h-dvh (a floor, grows with content) — overflow-hidden here too made THIS
+          div (which never actually scrolls itself) BottomNav's nearest scroll-container ancestor
+          for its `sticky bottom-0`, instead of the real window. Since this div doesn't scroll,
+          sticky had nothing to stick against and BottomNav just sat at the bottom of the full
+          page content instead of floating at the visible viewport edge. */}
+      <div className={`flex-1 md:ml-64 flex flex-col ${hideTopBar ? "h-dvh overflow-hidden" : "min-h-dvh"}`}>
         {/* Skipped on wizard-style pages (hideTopBar) that want a distraction-free, full-height
             flow — BottomNav below still covers mobile navigation either way, so nothing about
             reaching other pages is actually lost by dropping this. */}
-        {!hideTopBar && <TopBar title={title} onMenuClick={() => setSidebarOpen(true)} />}
+        {!hideTopBar && <TopBar title={title} />}
         {/* hideTopBar pages (the booking wizard) get a genuinely bounded, scrollable-but-
             scrollbar-hidden frame (h-screen above + overflow-y-auto no-scrollbar here) instead
             of the normal whole-page scroll — the wizard's own layout keeps its content inside

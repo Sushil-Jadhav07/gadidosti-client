@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Receipt, MapPin, CreditCard, Bell, Headphones, FileText,
   LogOut, ChevronRight, Phone, Mail, Pencil, Package, Wallet, CalendarDays,
-  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound,
+  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound, CalendarClock,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
@@ -18,6 +18,7 @@ const MENU_SECTIONS = [
     items: [
       { icon: ClipboardList, label: "My Bookings", path: "/bookings" },
       { icon: Receipt, label: "My Invoices", action: "coming_soon" },
+      { icon: CalendarClock, label: "Monthly Vehicle Hiring", path: "/monthly-hiring" },
     ],
   },
   {

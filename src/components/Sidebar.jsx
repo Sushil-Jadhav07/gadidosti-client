@@ -15,9 +15,10 @@ const NAV_ITEMS = [
 ];
 
 // A normal, always-full-width, flush sidebar — no floating margins/rounded corners, no
-// hover-to-expand rail. Desktop is permanently visible at w-64; mobile keeps the same
-// full-width slide-in drawer driven by isOpen/onClose as before.
-export default function Sidebar({ isOpen, onClose }) {
+// hover-to-expand rail. Desktop-only (hidden md:flex) — mobile navigation is BottomNav alone
+// now, not a slide-in drawer of this same list, so there's no isOpen toggle to reach this on
+// mobile at all anymore (TopBar's old hamburger button is gone too).
+export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -41,10 +42,7 @@ export default function Sidebar({ isOpen, onClose }) {
   const roleLabel = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Client";
 
   return (
-    <aside
-      className={`fixed inset-y-0 left-0 z-40 w-64 flex flex-col bg-primary transition-transform duration-300
-        ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
-    >
+    <aside className="hidden md:flex fixed inset-y-0 left-0 z-40 w-64 flex-col bg-primary">
       {/* Logo — the wordmark itself is dark text, unreadable straight on this dark sidebar
           (only the blue/green "GD" icon would show); a small white chip behind it keeps the
           real logo colors intact instead of forcing the whole thing white via a filter. */}
@@ -63,7 +61,7 @@ export default function Sidebar({ isOpen, onClose }) {
           return (
             <button
               key={path}
-              onClick={() => { navigate(path); onClose?.(); }}
+              onClick={() => navigate(path)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 group ${
                 isActive
                   ? "bg-white text-primary shadow-md shadow-primary/20"
@@ -92,7 +90,7 @@ export default function Sidebar({ isOpen, onClose }) {
             both stacked on top of each other. */}
         <div className="pt-3 space-y-0.5">
           <button
-            onClick={() => { navigate("/notifications"); onClose?.(); }}
+            onClick={() => navigate("/notifications")}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-white/50 hover:bg-white/10 hover:text-white"
           >
             <Bell size={18} strokeWidth={1.8} className="flex-shrink-0" />
@@ -107,7 +105,7 @@ export default function Sidebar({ isOpen, onClose }) {
           {/* Goes to the chat list (see pages/Chats.jsx) — every thread this client's on, not
               just one booking. */}
           <button
-            onClick={() => { navigate("/chats"); onClose?.(); }}
+            onClick={() => navigate("/chats")}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-white/50 hover:bg-white/10 hover:text-white"
           >
             <MessageCircle size={18} strokeWidth={1.8} className="flex-shrink-0" />

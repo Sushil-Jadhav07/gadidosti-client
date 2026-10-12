@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MapPin, Menu, User, LogOut, ChevronDown } from "lucide-react";
+import { MapPin, User, LogOut, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-export default function TopBar({ title, onMenuClick }) {
+export default function TopBar({ title }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -30,13 +30,6 @@ export default function TopBar({ title, onMenuClick }) {
   return (
     <header className="h-14 md:h-16 bg-white border-b border-neutral-100 flex items-center justify-between px-4 md:px-8 flex-shrink-0 sticky top-0 z-30">
       <div className="flex items-center gap-3">
-        <button
-          onClick={onMenuClick}
-          className="md:hidden p-1.5 text-neutral-500 hover:text-neutral-700 hover:bg-neutral-50 rounded-lg transition-colors"
-          aria-label="Open menu"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
         <h2 className="font-poppins font-semibold text-base md:text-xl text-neutral-800">{title}</h2>
       </div>
 

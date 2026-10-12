@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).devDependencies.tailwindcss || require\\('./package.json'\\).dependencies.tailwindcss\\)\")",
+      "Bash(curl -s \"http://localhost:5173/src/pages/Home.jsx\")",
+      "Bash(curl -s \"http://localhost:5173/src/index.css\")",
+      "Bash(grep -o \"overflow-x: hidden[^\\\\\\\\\\\\\\\\]*\")",
+      "Bash(curl -s \"http://localhost:5173/\" -o /dev/null -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(taskkill //F //PID 5448)",
+      "Bash(grep -o '[^\\\\\\\\]*grid-cols-2[^}]*}')"
+    ]
+  }
+}

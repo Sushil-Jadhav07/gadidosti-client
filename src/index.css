@@ -30,6 +30,24 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Global safety net: whatever specific element is momentarily a few px too wide (dynamic
+     content — a long address string, a live map, a 7-item bottom nav — is exactly the kind of
+     thing that keeps finding new ways to trip CSS Grid/Flex's default min-width:auto floor one
+     element at a time), the PAGE itself should never be able to scroll/shift horizontally on a
+     page that has no intentional horizontal scrolling anywhere. overflow-x-auto elements (the
+     Recent Shipments table) are unaffected — that's their own local scroll container, nested
+     inside this, not this rule.
+     `clip`, not `hidden` — per the CSS overflow spec, setting overflow-x to anything but
+     `visible` while overflow-y is left `visible` forces overflow-y to compute as `auto`
+     instead, turning html/body into their own independent vertical scroll container. That's
+     what broke BottomNav's `position: sticky`, which needs the real window to be the scrolling
+     ancestor. `clip` doesn't trigger that same-axis coupling, so vertical scrolling stays
+     exactly as it was (visible/window-driven) while horizontal overflow is still clipped. */
+  html, body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
   body {
     font-family: 'Inter', sans-serif;
     background-color: #F8FAFC;

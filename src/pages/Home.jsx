@@ -243,7 +243,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="p-4 md:p-8 animate-page-enter">
+      <div className="p-4 md:p-8 max-w-[430px] w-full md:max-w-7xl mx-auto animate-page-enter">
         <div className="h-7 w-44 skeleton-shimmer animate-shimmer rounded mb-5" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-5 md:mb-6">
           {[...Array(4)].map((_, i) => <div key={i} className="h-24 skeleton-shimmer animate-shimmer rounded-xl" />)}
@@ -258,7 +258,11 @@ export default function Home() {
   }
 
   return (
-    <div className="p-4 md:p-8 pb-24 animate-page-enter">
+    // max-w-[430px] w-full, not w-[430px] — a fixed width would force this exact width even on
+    // a phone narrower than 430px, forcing the page wider than its own viewport (precisely the
+    // overflow bug fixed earlier). max-w + w-full caps the width on larger phones/small tablets
+    // while still shrinking to fit anything narrower, same as every other page's max-w pattern.
+    <div className="p-4 md:p-8 pb-24 max-w-[430px] w-full md:max-w-7xl mx-auto animate-page-enter">
       <div className="mb-5 md:mb-6">
         <h1 className="font-poppins font-bold text-xl md:text-2xl text-neutral-800">Overview</h1>
         <p className="text-sm text-neutral-400 mt-0.5">Live operations status and metrics.</p>
@@ -282,7 +286,7 @@ export default function Home() {
             {statCards.map((card) => (
               <div
                 key={card.label}
-                className={`rounded-xl p-4 md:p-5 transition-shadow duration-200 ${
+                className={`min-w-0 rounded-xl p-4 md:p-5 transition-shadow duration-200 ${
                   card.danger ? "bg-red-50" : "bg-white shadow-card hover:shadow-card-hover"
                 }`}
               >
@@ -302,9 +306,12 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Live map + Upcoming bookings */}
+          {/* Live map + Upcoming bookings — min-w-0 on both grid children: without it, a grid
+              item's default min-width:auto lets unbreakable content (a long booking address
+              string with no wrap point) push its column past its fair share, widening the whole
+              grid (and the page, on mobile) past the viewport instead of just truncating. */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 md:gap-6 items-stretch mb-5 md:mb-6">
-            <div className="xl:col-span-2 bg-white rounded-xl shadow-card overflow-hidden flex flex-col">
+            <div className="min-w-0 xl:col-span-2 bg-white rounded-xl shadow-card overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-50">
                 <h3 className="font-poppins font-semibold text-base text-neutral-800">Live Shipment Map</h3>
                 <button
@@ -376,7 +383,7 @@ export default function Home() {
                 </button>
               )}
 
-              <div className="flex-1 min-h-[260px] p-3">
+              <div className="min-w-0 flex-1 min-h-[260px] p-3">
                 {liveLoading && !liveTrucks.length ? (
                   <div className="h-full min-h-[240px] rounded-lg bg-neutral-50 flex items-center justify-center">
                     <span className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
@@ -402,14 +409,14 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-card flex flex-col">
+            <div className="min-w-0 bg-white rounded-xl shadow-card flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-50">
                 <h3 className="font-poppins font-semibold text-base text-neutral-800">Upcoming Bookings</h3>
                 <button onClick={() => navigate("/bookings")} className="text-xs font-semibold text-primary hover:text-primary-dark transition-colors flex-shrink-0">
                   View All
                 </button>
               </div>
-              <div className="flex-1 min-h-[200px] p-3 space-y-1 overflow-y-auto">
+              <div className="min-w-0 flex-1 min-h-[200px] p-3 space-y-1 overflow-y-auto">
                 {upcomingBookings.length === 0 ? (
                   <p className="text-sm text-neutral-400 text-center py-10">No upcoming bookings</p>
                 ) : (

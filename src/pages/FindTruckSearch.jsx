@@ -330,18 +330,24 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
   );
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="bg-white rounded-2xl shadow-card overflow-hidden flex flex-col flex-1 lg:min-h-0">
+    // Height-bound (h-full, internal scroll) only from lg up, where the map needs a real
+    // viewport-bound box to fill via lockedCenter. Below lg there's no split pane to bound —
+    // this just flows as normal page content at its natural height, scrolled by WebLayout's
+    // own <main> like everything else in the wizard; forcing h-full/overflow-hidden here too
+    // was clipping anything past the fold (the status/driver-cards section) with no way to
+    // reach it, since nothing inside was actually a bounded, independently-scrollable box.
+    <div className="lg:h-full flex flex-col">
+      <div className="bg-white rounded-2xl shadow-card lg:overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
         {/* Left/right split, map on the right, full height from the very top — step indicator,
             header, booking summary, and status all live in the left column now, so the right
             side is nothing but the map (no floating card on top of it either). */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch flex-1 lg:min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch lg:flex-1 lg:min-h-0">
           {/* min-w-0 on both grid children — without it, a grid item's default min-width:auto
               lets long in-flow content (addresses, driver rows) force this column past its fair
               share of the row, pushing the map column into overflow instead of just wrapping.
               That's what the horizontal scrollbar was, and why the map looked like it "wasn't
               loading" — it was rendering fine, just squeezed/pushed off past the visible edge. */}
-          <div className="min-w-0 p-5 md:p-8 border-b lg:border-b-0 lg:border-r border-neutral-100 lg:overflow-y-auto lg:min-h-0 no-scrollbar">
+          <div className="min-w-0 p-5 md:p-8 border-b lg:border-b-0 lg:border-r border-neutral-100 overflow-y-auto lg:min-h-0 no-scrollbar">
             <StepIndicator currentStep={5} onStepClick={undefined} embedded />
             <div className="flex items-center gap-3 mb-1">
               <button
@@ -522,8 +528,10 @@ function DriverFanOutWaiting({ bookingId, askingPrice, pickup, pickupLat, pickup
             </div>
           </div>
 
-          {/* Right: nothing but the map — pickup location only, fixed/locked, full height. */}
-          <div className="relative min-w-0 h-full min-h-[420px] bg-neutral-50">
+          {/* Right: nothing but the map — pickup location only, fixed/locked. Fixed px height
+              below lg (h-full only means something once the card above is actually bounded),
+              full height of the split pane from lg up. */}
+          <div className="relative min-w-0 h-72 lg:h-full bg-neutral-50">
             {hasPickupCoords && (
               <MapView
                 markers={searchMapMarkers}

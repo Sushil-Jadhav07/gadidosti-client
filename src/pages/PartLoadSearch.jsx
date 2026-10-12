@@ -171,10 +171,12 @@ export default function PartLoadSearch({ bookingId, bookingNumber, pickup, picku
   const headerTitle = phase === "candidates" ? "Pick a truck to share" : phase === "pending" ? "Waiting for the driver" : "Load Confirmed!";
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="bg-white rounded-2xl shadow-card overflow-hidden flex flex-col flex-1 lg:min-h-0">
-        <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch flex-1 lg:min-h-0">
-          <div className="min-w-0 p-5 md:p-8 border-b lg:border-b-0 lg:border-r border-neutral-100 lg:overflow-y-auto lg:min-h-0 no-scrollbar">
+    // Same mobile-flows-normally / desktop-height-bound split as FindTruckSearch.jsx — see its
+    // comment here for why h-full/overflow-hidden can't be unconditional below lg.
+    <div className="lg:h-full flex flex-col">
+      <div className="bg-white rounded-2xl shadow-card lg:overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-2 items-stretch lg:flex-1 lg:min-h-0">
+          <div className="min-w-0 p-5 md:p-8 border-b lg:border-b-0 lg:border-r border-neutral-100 overflow-y-auto lg:min-h-0 no-scrollbar">
             <StepIndicator currentStep={5} onStepClick={undefined} embedded />
             <div className="flex items-center gap-3 mb-1">
               <button
@@ -320,9 +322,9 @@ export default function PartLoadSearch({ bookingId, bookingNumber, pickup, picku
             </div>
           </div>
 
-          {/* Right: nothing but the map — pickup location only, fixed/locked, full height,
-              same shell as FindTruckSearch.jsx's own map panel. */}
-          <div className="relative min-w-0 h-full min-h-[420px] bg-neutral-50">
+          {/* Right: nothing but the map — pickup location only, fixed/locked, same shell as
+              FindTruckSearch.jsx's own map panel. */}
+          <div className="relative min-w-0 h-72 lg:h-full bg-neutral-50">
             {hasPickupCoords && (
               <MapView
                 markers={searchMapMarkers}
