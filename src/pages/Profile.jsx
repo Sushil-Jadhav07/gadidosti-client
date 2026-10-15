@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Receipt, MapPin, CreditCard, Bell, Headphones, FileText,
   LogOut, ChevronRight, Phone, Mail, Pencil, Package, Wallet, CalendarDays,
-  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound, CalendarClock,
+  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound, CalendarClock, UserX,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
@@ -44,6 +44,10 @@ export default function Profile() {
   const { user, logout, updateProfile, changePassword } = useAuth();
   const toast = useToast();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteRequested, setDeleteRequested] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [profile, setProfile] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -168,6 +172,24 @@ export default function Profile() {
     await logout();
     toast.success("You have been logged out successfully");
     navigate("/login");
+  };
+
+  // Name/email/phone aren't sent here at all — the backend reads the verified account straight
+  // off the auth token (see POST /api/account-deletion-requests/me), so there's nothing to type
+  // except, optionally, why. Only ever logs a request for an admin to review; nothing here
+  // deletes or touches any account data itself.
+  const handleRequestDeletion = async () => {
+    setDeletingAccount(true);
+    try {
+      const res = await api.post("/api/account-deletion-requests/me", { reason: deleteReason.trim() || undefined }, getToken());
+      if (!res?.success) throw new Error(res?.message || "Failed to submit request");
+      setDeleteRequested(true);
+      toast.success("Request received — our team will follow up shortly.");
+    } catch (err) {
+      toast.error(err?.message || "Failed to submit request");
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   return (
@@ -324,6 +346,14 @@ export default function Profile() {
             <LogOut className="w-[18px] h-[18px]" strokeWidth={1.8} />
             Sign Out
           </button>
+
+          <button
+            onClick={() => { setDeleteReason(""); setDeleteRequested(false); setShowDeleteSheet(true); }}
+            className="w-full flex items-center justify-center gap-2 bg-red-50/60 border border-red-100 rounded-xl h-12 text-xs font-semibold text-danger/80 hover:bg-red-50 transition-colors"
+          >
+            <UserX className="w-4 h-4" strokeWidth={1.8} />
+            Request Account Deletion
+          </button>
         </div>
       </div>
 
@@ -350,6 +380,60 @@ export default function Profile() {
             </button>
           </div>
         </div>
+      </BottomSheet>
+
+      {/* Request Account Deletion */}
+      <BottomSheet isOpen={showDeleteSheet} onClose={() => setShowDeleteSheet(false)}>
+        {deleteRequested ? (
+          <div className="text-center pt-2 pb-2 pr-4">
+            <div className="w-14 h-14 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
+              <UserX className="w-7 h-7 text-success" />
+            </div>
+            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Request Received</h3>
+            <p className="text-sm text-neutral-400 mb-8">Our team will follow up by email or phone to verify and complete your request.</p>
+            <button
+              onClick={() => setShowDeleteSheet(false)}
+              className="w-full bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        ) : (
+          <div className="pt-2 pb-2 pr-4">
+            <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mb-4">
+              <UserX className="w-7 h-7 text-danger" />
+            </div>
+            <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">Request Account Deletion</h3>
+            <p className="text-sm text-neutral-400 mb-5">
+              This sends a request to our team — your account isn't deleted immediately. See our{" "}
+              <a href="/legal/account_deletion" target="_blank" rel="noreferrer" className="text-primary hover:underline">Account Deletion policy</a> for what's retained and why.
+            </p>
+            <label className="block text-xs font-semibold text-neutral-500 mb-1.5">Reason (optional)</label>
+            <textarea
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value.slice(0, 2000))}
+              rows={3}
+              className="w-full resize-none rounded-lg border border-neutral-200 p-3 text-sm text-neutral-700 placeholder:text-neutral-300 outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] mb-5"
+              placeholder="Let us know why you're leaving (optional)..."
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteSheet(false)}
+                disabled={deletingAccount}
+                className="flex-1 bg-white border border-neutral-200 text-neutral-700 font-medium py-3 rounded-lg hover:bg-neutral-50 transition-colors disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestDeletion}
+                disabled={deletingAccount}
+                className="flex-1 bg-danger text-white font-medium py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-60"
+              >
+                {deletingAccount ? "Submitting..." : "Submit Request"}
+              </button>
+            </div>
+          </div>
+        )}
       </BottomSheet>
 
       {/* Edit Profile */}
