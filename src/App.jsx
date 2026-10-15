@@ -19,6 +19,8 @@ import MyBookings from "./pages/MyBookings";
 import BookingDetail from "./pages/BookingDetail";
 import TrackShipment from "./pages/TrackShipment";
 import PublicTracking from "./pages/PublicTracking";
+import LegalIndex from "./pages/legal/LegalIndex";
+import LegalPage from "./pages/legal/LegalPage";
 import Chats from "./pages/Chats";
 import ChatDetail from "./pages/ChatDetail";
 import Profile from "./pages/Profile";
@@ -136,6 +138,11 @@ function AppRoutes() {
           for anyone) and outside WebLayout (no sidebar/header, no authenticated-only chrome).
           Whoever the link is shared with may not have — or need — an account at all. */}
       <Route path="/t/:token" element={<PublicTracking />} />
+      {/* Public legal/compliance pages (Privacy Policy, Terms, Account Deletion, etc.) — app-
+          store listing links need these reachable with no login, same placement reasoning as
+          /t/:token above. */}
+      <Route path="/legal" element={<LegalIndex />} />
+      <Route path="/legal/:pageKey" element={<LegalPage />} />
       <Route
         path="/"
         element={

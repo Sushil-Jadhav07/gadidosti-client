@@ -33,8 +33,8 @@ const MENU_SECTIONS = [
   {
     title: "Help",
     items: [
-      { icon: Headphones, label: "Help & Support", action: "coming_soon" },
-      { icon: FileText, label: "Terms & Privacy", action: "coming_soon" },
+      { icon: Headphones, label: "Help & Support", path: "/legal/contact_support" },
+      { icon: FileText, label: "Terms & Privacy", path: "/legal" },
     ],
   },
 ];
