@@ -339,12 +339,7 @@ export default function Login() {
               </>
             )}
 
-            <div className="mt-4 p-3.5 bg-primary-50 rounded-xl text-center">
-              <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">Demo Credentials</p>
-              <p className="text-xs font-mono text-primary">
-                client@gmail.com <span className="text-neutral-300 mx-1.5">|</span> client@123
-              </p>
-            </div>
+        
 
             <p className="text-sm text-neutral-500 text-center mt-4">
               New here?{" "}
