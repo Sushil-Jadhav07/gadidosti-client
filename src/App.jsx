@@ -8,6 +8,7 @@ import SessionExpiredModal from "./components/SessionExpiredModal";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ChatUnreadProvider } from "./context/ChatUnreadContext";
+import { KycStatusProvider, useKycStatus } from "./context/KycStatusContext";
 import usePushNotifications from "./hooks/usePushNotifications";
 import ChatNotificationListener from "./components/ChatNotificationListener";
 import ChatLauncher from "./components/ChatLauncher";
@@ -30,7 +31,7 @@ import PaymentMethods from "./pages/PaymentMethods";
 import Notifications from "./pages/Notifications";
 import MonthlyHiring from "./pages/MonthlyHiring";
 import MonthlyHiringForm from "./pages/MonthlyHiringForm";
-import VerifyGST from "./pages/VerifyGST";
+import Verification from "./pages/Verification";
 import Wallet from "./pages/Wallet";
 
 const PAGE_TITLES = {
@@ -46,7 +47,7 @@ const PAGE_TITLES = {
   "/notifications": "Notifications",
   "/monthly-hiring": "Monthly Vehicle Hiring",
   "/monthly-hiring/new": "New Enquiry",
-  "/verify-gst": "GST Verification",
+  "/verify": "Verification",
   "/wallet": "Wallet",
 };
 
@@ -113,6 +114,23 @@ function PublicRoute({ children }) {
   return children;
 }
 
+// Mandatory, no exceptions — every page except Dashboard, Profile, Chat and Verification
+// itself is locked until PAN + Aadhaar + GST are all verified (see KycStatusContext). Sits
+// inside ProtectedRoute (auth already confirmed) and outside WebLayout, so a locked attempt
+// redirects straight to /verify rather than rendering the page underneath it at all.
+// `loading` renders nothing rather than deciding early — a brief blank beat beats a false
+// redirect-then-snap-back while the one shared fetch (KycStatusProvider) is still in flight.
+function KycGate({ children }) {
+  const { kycStatus, loading } = useKycStatus();
+  const location = useLocation();
+
+  if (loading) return null;
+  if (kycStatus !== "verified") {
+    return <Navigate to="/verify" state={{ from: location }} replace />;
+  }
+  return children;
+}
+
 function AppRoutes() {
   // Registers this device for push once authenticated, for the lifetime of the app — not
   // scoped to any one route, so it lives here rather than inside a specific page.
@@ -161,9 +179,11 @@ function AppRoutes() {
         path="/book"
         element={
           <ProtectedRoute>
-            <WebLayout hideTopBar>
-              <BookTruck />
-            </WebLayout>
+            <KycGate>
+              <WebLayout hideTopBar>
+                <BookTruck />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -171,9 +191,11 @@ function AppRoutes() {
         path="/bookings"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <MyBookings />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <MyBookings />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -181,9 +203,11 @@ function AppRoutes() {
         path="/bookings/:id"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <BookingDetail />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <BookingDetail />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -191,9 +215,11 @@ function AppRoutes() {
         path="/track"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <TrackShipment />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <TrackShipment />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -231,9 +257,11 @@ function AppRoutes() {
         path="/addresses"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <SavedAddresses />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <SavedAddresses />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -241,9 +269,11 @@ function AppRoutes() {
         path="/addresses/new"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <AddressForm />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <AddressForm />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -251,9 +281,11 @@ function AppRoutes() {
         path="/addresses/:id/edit"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <AddressForm />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <AddressForm />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -261,9 +293,11 @@ function AppRoutes() {
         path="/payment-methods"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <PaymentMethods />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <PaymentMethods />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -271,9 +305,11 @@ function AppRoutes() {
         path="/monthly-hiring"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <MonthlyHiring />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <MonthlyHiring />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -281,9 +317,11 @@ function AppRoutes() {
         path="/monthly-hiring/new"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <MonthlyHiringForm />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <MonthlyHiringForm />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -291,18 +329,20 @@ function AppRoutes() {
         path="/notifications"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <Notifications />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <Notifications />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
       <Route
-        path="/verify-gst"
+        path="/verify"
         element={
           <ProtectedRoute>
             <WebLayout>
-              <VerifyGST />
+              <Verification />
             </WebLayout>
           </ProtectedRoute>
         }
@@ -311,9 +351,11 @@ function AppRoutes() {
         path="/wallet"
         element={
           <ProtectedRoute>
-            <WebLayout>
-              <Wallet />
-            </WebLayout>
+            <KycGate>
+              <WebLayout>
+                <Wallet />
+              </WebLayout>
+            </KycGate>
           </ProtectedRoute>
         }
       />
@@ -326,14 +368,16 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <ChatUnreadProvider>
-          <ToastProvider>
-            <AppRoutes />
-            <ChatNotificationListener />
-            <ChatLauncher />
-            <SessionExpiredModal />
-          </ToastProvider>
-        </ChatUnreadProvider>
+        <KycStatusProvider>
+          <ChatUnreadProvider>
+            <ToastProvider>
+              <AppRoutes />
+              <ChatNotificationListener />
+              <ChatLauncher />
+              <SessionExpiredModal />
+            </ToastProvider>
+          </ChatUnreadProvider>
+        </KycStatusProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

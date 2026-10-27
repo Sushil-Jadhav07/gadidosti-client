@@ -27,7 +27,7 @@ const MENU_SECTIONS = [
       { icon: MapPin, label: "Saved Addresses", path: "/addresses" },
       { icon: CreditCard, label: "Payment Methods", path: "/payment-methods" },
       { icon: Wallet, label: "Wallet", path: "/wallet" },
-      { icon: ReceiptText, label: "GST Verification", path: "/verify-gst" },
+      { icon: ReceiptText, label: "Verification", path: "/verify" },
       { icon: Bell, label: "Notifications", path: "/notifications" },
       { icon: KeyRound, label: "Change Password", action: "change_password" },
     ],

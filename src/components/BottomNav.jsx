@@ -1,6 +1,6 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User, CalendarClock } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User, CalendarClock, Wallet } from "lucide-react";
 
 const NAV_ITEMS = [
   { path: "/", label: "Home", Icon: Home },
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { path: "/bookings", label: "Bookings", Icon: ClipboardList },
   { path: "/track", label: "Track", Icon: MapPin },
   { path: "/monthly-hiring", label: "Monthly", Icon: CalendarClock },
+  { path: "/wallet", label: "Wallet", Icon: Wallet },
   { path: "/chats", label: "Chats", Icon: MessageCircle },
   { path: "/profile", label: "Profile", Icon: User },
 ];

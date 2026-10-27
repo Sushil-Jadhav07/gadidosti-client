@@ -15,8 +15,9 @@ import TimePicker from "../components/TimePicker";
 import MapView from "../components/MapView";
 import ChooseBroker from "./ChooseBroker";
 import FindTruckSearch from "./FindTruckSearch";
-import GstRequiredSheet from "../components/GstRequiredSheet";
+import KycRequiredSheet from "../components/KycRequiredSheet";
 import { useToast } from "../context/ToastContext";
+import { useKycStatus } from "../context/KycStatusContext";
 import { api, getToken } from "../services/api";
 import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
 import { store } from "../store/store";
@@ -234,17 +235,13 @@ export default function BookTruck() {
     const stored = store.getState().bookingWizard;
     return stored?.step && stored.step < 5 ? stored.step : 1;
   });
-  // Mandatory GST gate — fetched fresh on mount rather than trusted off a possibly-stale cached
-  // auth user, since this can change between sessions (see VerifyGST.jsx). null = not loaded
-  // yet (treated as "don't block" until the real check comes back — the backend's own
-  // GST_VERIFICATION_REQUIRED 403, caught below, is the actual lock either way).
-  const [gstVerified, setGstVerified] = useState(null);
-  const [showGstSheet, setShowGstSheet] = useState(false);
-  useEffect(() => {
-    api.get("/api/gst/status", token).then((res) => {
-      if (res?.success) setGstVerified(res.data.gst_verification_status === "verified");
-    }).catch(() => {});
-  }, [token]);
+  // Mandatory KYC gate (PAN + Aadhaar + GST) — shared app-wide fetch (see KycStatusContext),
+  // not a local one, so this stays in sync with App.jsx's KycGate on every other locked page.
+  // null = not loaded yet (treated as "don't block" until the real check comes back — the
+  // backend's own KYC_VERIFICATION_REQUIRED 403, caught below, is the actual lock either way).
+  const { kycStatus, refresh: refreshKycStatus } = useKycStatus();
+  const kycVerified = kycStatus == null ? null : kycStatus === "verified";
+  const [showKycSheet, setShowKycSheet] = useState(false);
 
   const [cities, setCities] = useState(FALLBACK_CITIES);
   // Quick-pick chips on Step 1 (see the Saved Addresses section, right above Popular Cities) —
@@ -837,9 +834,9 @@ export default function BookTruck() {
       return;
     }
     // Mandatory, no exceptions — shown instead of calling the API; the backend's own
-    // GST_VERIFICATION_REQUIRED 403 (caught below) is the real lock either way.
-    if (gstVerified === false) {
-      setShowGstSheet(true);
+    // KYC_VERIFICATION_REQUIRED 403 (caught below) is the real lock either way.
+    if (kycVerified === false) {
+      setShowKycSheet(true);
       return;
     }
     if (!form.searchMode) {
@@ -939,12 +936,12 @@ export default function BookTruck() {
       }, token);
 
       if (!response?.success) {
-        // GST_VERIFICATION_REQUIRED is the real lock (see createBooking in booking.controller.js)
-        // — the client-side gstVerified check above is just the fast path; this fallback catches
-        // a stale/unknown client-side state (e.g. gstVerified was still null) with the same popup.
-        if (response?.errors?.code === "GST_VERIFICATION_REQUIRED") {
-          setGstVerified(false);
-          setShowGstSheet(true);
+        // KYC_VERIFICATION_REQUIRED is the real lock (see createBooking in booking.controller.js)
+        // — the client-side kycVerified check above is just the fast path; this fallback catches
+        // a stale/unknown client-side state (e.g. kycVerified was still null) with the same popup.
+        if (response?.errors?.code === "KYC_VERIFICATION_REQUIRED") {
+          refreshKycStatus();
+          setShowKycSheet(true);
           return;
         }
         throw new Error(response?.message || "Failed to confirm booking");
@@ -985,15 +982,20 @@ export default function BookTruck() {
       const response = await api.post("/api/bookings/validate-location", {
         pickup_location: form.pickup,
         drop_location: form.drop,
+        pickup_pincode: form.pickupPincode || undefined,
+        drop_pincode: form.dropPincode || undefined,
         transport_type: form.transportType,
         city: form.transportType === "intra" ? form.city : undefined,
       }, token);
 
       if (!response?.success) {
-        // The backend only reports a generic "Validation failed" — for an intra-city trip
-        // the near-universal cause is one of the two addresses falling outside the shared
-        // city, so surface that reason directly instead of the opaque backend message.
-        const message = form.transportType === "intra" && form.city
+        // PINCODE_REQUIRED/PINCODE_NOT_SERVICEABLE already carry a specific, accurate message
+        // from the backend — only the generic "Validation failed" case gets the city-mismatch
+        // guess below (still the near-universal cause of *that* one, for an intra-city trip).
+        const isGeofenceError = ["PINCODE_REQUIRED", "PINCODE_NOT_SERVICEABLE"].includes(response?.errors?.code);
+        const message = isGeofenceError
+          ? response.message
+          : form.transportType === "intra" && form.city
           ? `Pickup and drop must both be within ${form.city} for an Intra-City booking. Please choose a location inside ${form.city}.`
           : response?.message || "These pickup/drop locations aren't valid for this trip";
         throw new Error(message);
@@ -1680,6 +1682,12 @@ export default function BookTruck() {
                             // name still geocodes reliably, unlike a full free-typed address.
                             updateForm(target === "drop" ? "dropLat" : "pickupLat", null);
                             updateForm(target === "drop" ? "dropLng" : "pickupLng", null);
+                            // A whole city has no single pincode — clear any stale one left over
+                            // from a prior specific-address search, rather than silently reusing a
+                            // wrong one for the geofencing check at booking time. This also means a
+                            // city chip alone can never satisfy an active pincode whitelist — the
+                            // client has to search/pin a precise address for that.
+                            updateForm(target === "drop" ? "dropPincode" : "pickupPincode", null);
                             if (mapsLoaded && window.google?.maps) {
                               try {
                                 const geocoder = new window.google.maps.Geocoder();
@@ -2435,7 +2443,7 @@ export default function BookTruck() {
         )}
       </div>
 
-      <GstRequiredSheet isOpen={showGstSheet} onClose={() => setShowGstSheet(false)} />
+      <KycRequiredSheet isOpen={showKycSheet} onClose={() => setShowKycSheet(false)} />
     </div>
   );
 }
