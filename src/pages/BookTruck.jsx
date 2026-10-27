@@ -15,6 +15,7 @@ import TimePicker from "../components/TimePicker";
 import MapView from "../components/MapView";
 import ChooseBroker from "./ChooseBroker";
 import FindTruckSearch from "./FindTruckSearch";
+import GstRequiredSheet from "../components/GstRequiredSheet";
 import { useToast } from "../context/ToastContext";
 import { api, getToken } from "../services/api";
 import { bookingRef, haversineDistanceKm, formatDate } from "../utils";
@@ -50,10 +51,12 @@ const INITIAL_FORM = {
   pickupLat: null,
   pickupLng: null,
   pickupCity: null,
+  pickupPincode: null,
   drop: "",
   dropLat: null,
   dropLng: null,
   dropCity: null,
+  dropPincode: null,
   // Extra stops between pickup and drop (Ola/Uber-style "add stop") — each
   // { location, lat, lng }, visited in this array order, never auto-reordered. Loading
   // points are extra pickups (e.g. a second warehouse), unloading points are extra drops.
@@ -231,6 +234,18 @@ export default function BookTruck() {
     const stored = store.getState().bookingWizard;
     return stored?.step && stored.step < 5 ? stored.step : 1;
   });
+  // Mandatory GST gate — fetched fresh on mount rather than trusted off a possibly-stale cached
+  // auth user, since this can change between sessions (see VerifyGST.jsx). null = not loaded
+  // yet (treated as "don't block" until the real check comes back — the backend's own
+  // GST_VERIFICATION_REQUIRED 403, caught below, is the actual lock either way).
+  const [gstVerified, setGstVerified] = useState(null);
+  const [showGstSheet, setShowGstSheet] = useState(false);
+  useEffect(() => {
+    api.get("/api/gst/status", token).then((res) => {
+      if (res?.success) setGstVerified(res.data.gst_verification_status === "verified");
+    }).catch(() => {});
+  }, [token]);
+
   const [cities, setCities] = useState(FALLBACK_CITIES);
   // Quick-pick chips on Step 1 (see the Saved Addresses section, right above Popular Cities) —
   // fetched once, same as cities/materialTypes below, just from a different endpoint since
@@ -484,10 +499,12 @@ export default function BookTruck() {
           const city = components.find((c) => c.types?.includes("locality"))?.long_name
             || components.find((c) => c.types?.includes("administrative_area_level_2"))?.long_name
             || null;
+          const pincode = components.find((c) => c.types?.includes("postal_code"))?.long_name || null;
           updateForm("pickup", address || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
           updateForm("pickupLat", latitude);
           updateForm("pickupLng", longitude);
           updateForm("pickupCity", city);
+          updateForm("pickupPincode", pincode);
         } catch {
           toast.error("Couldn't determine your address from this location");
         } finally {
@@ -535,24 +552,28 @@ export default function BookTruck() {
     const city = components.find((c) => c.types?.includes("locality"))?.long_name
       || components.find((c) => c.types?.includes("administrative_area_level_2"))?.long_name
       || null;
-    return { address, city };
+    // Used by the geofencing pincode-whitelist check at booking time (see handleConfirm).
+    const pincode = components.find((c) => c.types?.includes("postal_code"))?.long_name || null;
+    return { address, city, pincode };
   };
 
   // Reverse-geocodes a tapped map point into whichever field pinTarget currently points at.
   const handleMapClick = async ({ lat, lng }) => {
     if (!mapsLoaded || !window.google?.maps) return;
     try {
-      const { address, city } = await reverseGeocode(lat, lng);
+      const { address, city, pincode } = await reverseGeocode(lat, lng);
       if (pinTarget === "pickup") {
         updateForm("pickup", address);
         updateForm("pickupLat", lat);
         updateForm("pickupLng", lng);
         updateForm("pickupCity", city);
+        updateForm("pickupPincode", pincode);
       } else if (pinTarget === "drop") {
         updateForm("drop", address);
         updateForm("dropLat", lat);
         updateForm("dropLng", lng);
         updateForm("dropCity", city);
+        updateForm("dropPincode", pincode);
       } else if (pinTarget && typeof pinTarget === "object") {
         updateStop(pinTarget.key, pinTarget.index, { location: address, lat, lng });
       }
@@ -566,17 +587,19 @@ export default function BookTruck() {
   const handlePinDragEnd = async (target, { lat, lng }) => {
     if (!mapsLoaded || !window.google?.maps) return;
     try {
-      const { address, city } = await reverseGeocode(lat, lng);
+      const { address, city, pincode } = await reverseGeocode(lat, lng);
       if (target === "pickup") {
         updateForm("pickup", address);
         updateForm("pickupLat", lat);
         updateForm("pickupLng", lng);
         updateForm("pickupCity", city);
+        updateForm("pickupPincode", pincode);
       } else {
         updateForm("drop", address);
         updateForm("dropLat", lat);
         updateForm("dropLng", lng);
         updateForm("dropCity", city);
+        updateForm("dropPincode", pincode);
       }
     } catch {
       toast.error("Couldn't resolve an address for that point");
@@ -593,12 +616,13 @@ export default function BookTruck() {
     let cancelled = false;
     (async () => {
       try {
-        const { address, city } = await reverseGeocode(myLocation.lat, myLocation.lng);
+        const { address, city, pincode } = await reverseGeocode(myLocation.lat, myLocation.lng);
         if (cancelled) return;
         updateForm("pickup", address);
         updateForm("pickupLat", myLocation.lat);
         updateForm("pickupLng", myLocation.lng);
         updateForm("pickupCity", city);
+        updateForm("pickupPincode", pincode);
       } catch {
         // Silent — the client can still search or tap the map manually.
       }
@@ -812,6 +836,12 @@ export default function BookTruck() {
       toast.error("Please choose a future date and time for your scheduled booking.");
       return;
     }
+    // Mandatory, no exceptions — shown instead of calling the API; the backend's own
+    // GST_VERIFICATION_REQUIRED 403 (caught below) is the real lock either way.
+    if (gstVerified === false) {
+      setShowGstSheet(true);
+      return;
+    }
     if (!form.searchMode) {
       toast.error("Please choose how you'd like to find a truck.");
       return;
@@ -868,9 +898,11 @@ export default function BookTruck() {
         pickup_location: form.pickup,
         pickup_lat: form.pickupLat,
         pickup_lng: form.pickupLng,
+        pickup_pincode: form.pickupPincode || undefined,
         drop_location: form.drop,
         drop_lat: form.dropLat,
         drop_lng: form.dropLng,
+        drop_pincode: form.dropPincode || undefined,
         transport_type: form.transportType,
         city: form.transportType === "intra" ? form.city : undefined,
         // Same intra-city-only rule as the quote call above — 422s if sent true for "inter".
@@ -906,7 +938,17 @@ export default function BookTruck() {
         ...(form.truckType === "part" && form.partTruckSizeFilter ? { part_truck_size_category: form.partTruckSizeFilter } : {}),
       }, token);
 
-      if (!response?.success) throw new Error(response?.message || "Failed to confirm booking");
+      if (!response?.success) {
+        // GST_VERIFICATION_REQUIRED is the real lock (see createBooking in booking.controller.js)
+        // — the client-side gstVerified check above is just the fast path; this fallback catches
+        // a stale/unknown client-side state (e.g. gstVerified was still null) with the same popup.
+        if (response?.errors?.code === "GST_VERIFICATION_REQUIRED") {
+          setGstVerified(false);
+          setShowGstSheet(true);
+          return;
+        }
+        throw new Error(response?.message || "Failed to confirm booking");
+      }
 
       const booking = response.data?.booking;
       setCreatedBooking({
@@ -1428,12 +1470,14 @@ export default function BookTruck() {
                               updateForm("pickupLat", null);
                               updateForm("pickupLng", null);
                               updateForm("pickupCity", null);
+                              updateForm("pickupPincode", null);
                             }}
-                            onPlaceSelect={({ address, lat, lng, city }) => {
+                            onPlaceSelect={({ address, lat, lng, city, pincode }) => {
                               updateForm("pickup", address);
                               updateForm("pickupLat", lat);
                               updateForm("pickupLng", lng);
                               updateForm("pickupCity", city);
+                              updateForm("pickupPincode", pincode);
                             }}
                             inputProps={{ onFocus: () => setFocusedField("pickup") }}
                             placeholder="Enter pickup address or city"
@@ -1454,12 +1498,14 @@ export default function BookTruck() {
                               updateForm("dropLat", null);
                               updateForm("dropLng", null);
                               updateForm("dropCity", null);
+                              updateForm("dropPincode", null);
                             }}
-                            onPlaceSelect={({ address, lat, lng, city }) => {
+                            onPlaceSelect={({ address, lat, lng, city, pincode }) => {
                               updateForm("drop", address);
                               updateForm("dropLat", lat);
                               updateForm("dropLng", lng);
                               updateForm("dropCity", city);
+                              updateForm("dropPincode", pincode);
                             }}
                             inputProps={{ onFocus: () => setFocusedField("drop") }}
                             placeholder="Enter drop address or city"
@@ -1478,10 +1524,12 @@ export default function BookTruck() {
                             pickupLat: prev.dropLat,
                             pickupLng: prev.dropLng,
                             pickupCity: prev.dropCity,
+                            pickupPincode: prev.dropPincode,
                             drop: prev.pickup,
                             dropLat: prev.pickupLat,
                             dropLng: prev.pickupLng,
                             dropCity: prev.pickupCity,
+                            dropPincode: prev.pickupPincode,
                           }));
                         }}
                         className="w-9 h-9 rounded-full border border-primary bg-white flex items-center justify-center hover:bg-primary-50 transition-colors"
@@ -1595,6 +1643,10 @@ export default function BookTruck() {
                                 updateForm(target === "drop" ? "dropLat" : "pickupLat", addr.lat);
                                 updateForm(target === "drop" ? "dropLng" : "pickupLng", addr.lng);
                                 updateForm(target === "drop" ? "dropCity" : "pickupCity", addr.city || null);
+                                // Saved addresses don't carry a pincode — clear any stale value left over
+                                // from a previous search/pin, rather than silently reusing a wrong one for
+                                // the geofencing check at booking time.
+                                updateForm(target === "drop" ? "dropPincode" : "pickupPincode", null);
                               }}
                               title={addr.address}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
@@ -2382,6 +2434,8 @@ export default function BookTruck() {
         </div>
         )}
       </div>
+
+      <GstRequiredSheet isOpen={showGstSheet} onClose={() => setShowGstSheet(false)} />
     </div>
   );
 }

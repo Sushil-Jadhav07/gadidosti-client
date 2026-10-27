@@ -72,9 +72,14 @@ const loadRazorpayScript = () => {
 // ADVANCE_PAYMENT_THRESHOLD in gadidosti-backend's booking.controller.js and RequestDriver.jsx,
 // which is the only caller that ever passes false). title overrides the left summary panel's
 // "Price Summary" label, e.g. to "20% Advance" when `amount` is the advance, not the full price.
+//
+// orderUrl/orderBody/verifyUrl (all optional) let a non-booking caller (Wallet.jsx's recharge)
+// reuse this same gateway flow — default to the booking payment endpoints exactly as before, so
+// every existing bookingId-based caller is unaffected.
 export default function PaymentSheet({
   open, bookingId, payType = "full", amount, phone, token,
   onClose, onSuccess, onPayLater, allowPayLater = true, title = "Price Summary",
+  orderUrl, orderBody, verifyUrl,
 }) {
   const CATEGORIES = allowPayLater ? [...BASE_CATEGORIES, PAY_LATER_CATEGORY] : BASE_CATEGORIES;
   const [stage, setStage] = useState("methods"); // methods -> pin -> processing -> success
@@ -110,11 +115,13 @@ export default function PaymentSheet({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !bookingId) return;
+    if (!open || (!bookingId && !orderUrl)) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.post(`/api/bookings/${bookingId}/payment/order`, { pay_type: payType }, token);
+        const url = orderUrl || `/api/bookings/${bookingId}/payment/order`;
+        const body = orderBody || { pay_type: payType };
+        const res = await api.post(url, body, token);
         if (cancelled) return;
         if (!res?.success || !res.data?.order) throw new Error(res?.message || "Could not start payment");
         setOrder(res.data.order);
@@ -124,7 +131,11 @@ export default function PaymentSheet({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, bookingId, payType, token]);
+    // orderBody deliberately omitted — it's a fresh object on every render for callers that
+    // don't memoize it (e.g. Wallet.jsx), and this effect is already gated on `open` so it only
+    // needs to fire once per open, not on every orderBody identity change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, bookingId, payType, token, orderUrl]);
 
   // Verifies with the backend and hands the caller the freshly re-projected booking — this is
   // the ONLY path that actually results in onSuccess firing, for both gateway branches below.
@@ -132,11 +143,16 @@ export default function PaymentSheet({
     setVerifying(true);
     setVerifyError("");
     try {
-      const res = await api.post(`/api/bookings/${bookingId}/payment/verify`, {
-        order_id: order.orderId, pay_type: payType, payment_mode: paymentMode, ...payload,
+      const url = verifyUrl || `/api/bookings/${bookingId}/payment/verify`;
+      const res = await api.post(url, {
+        order_id: order.orderId,
+        ...(verifyUrl ? {} : { pay_type: payType, payment_mode: paymentMode }),
+        ...payload,
       }, token);
       if (!res?.success) throw new Error(res?.message || "Payment verification failed");
-      onSuccess(res.data?.booking);
+      // Booking-based callers expect the re-projected booking; a non-booking caller (verifyUrl
+      // set, e.g. Wallet.jsx) gets the raw response data instead (e.g. { balance }).
+      onSuccess(verifyUrl ? res.data : res.data?.booking);
     } catch (err) {
       setVerifyError(err?.message || "Payment verification failed");
       setVerifying(false);

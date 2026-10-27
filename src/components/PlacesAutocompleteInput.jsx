@@ -166,11 +166,15 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
         const city = components.find((c) => c.types?.includes("locality"))?.longText
           || components.find((c) => c.types?.includes("administrative_area_level_2"))?.longText
           || null;
+        // Used by the geofencing pincode-whitelist check at booking time (see BookTruck.jsx) —
+        // null here if Google doesn't return a postal_code component for this address.
+        const pincode = components.find((c) => c.types?.includes("postal_code"))?.longText || null;
         onPlaceSelect?.({
           address: stripCountrySuffix(place.formattedAddress || placePrediction.text?.text),
           lat: place.location.lat(),
           lng: place.location.lng(),
           city,
+          pincode,
         });
       } else {
         onChange(stripCountrySuffix(placePrediction.text?.text) || "");

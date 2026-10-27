@@ -30,6 +30,8 @@ import PaymentMethods from "./pages/PaymentMethods";
 import Notifications from "./pages/Notifications";
 import MonthlyHiring from "./pages/MonthlyHiring";
 import MonthlyHiringForm from "./pages/MonthlyHiringForm";
+import VerifyGST from "./pages/VerifyGST";
+import Wallet from "./pages/Wallet";
 
 const PAGE_TITLES = {
   "/": "Dashboard",
@@ -44,6 +46,8 @@ const PAGE_TITLES = {
   "/notifications": "Notifications",
   "/monthly-hiring": "Monthly Vehicle Hiring",
   "/monthly-hiring/new": "New Enquiry",
+  "/verify-gst": "GST Verification",
+  "/wallet": "Wallet",
 };
 
 function WebLayout({ children, hideTopBar }) {
@@ -289,6 +293,26 @@ function AppRoutes() {
           <ProtectedRoute>
             <WebLayout>
               <Notifications />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/verify-gst"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <VerifyGST />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <Wallet />
             </WebLayout>
           </ProtectedRoute>
         }

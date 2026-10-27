@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ClipboardList, Receipt, MapPin, CreditCard, Bell, Headphones, FileText,
   LogOut, ChevronRight, Phone, Mail, Pencil, Package, Wallet, CalendarDays,
-  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound, CalendarClock, UserX,
+  Building2, Lock, Eye, EyeOff, AlertCircle, KeyRound, CalendarClock, UserX, ReceiptText,
 } from "lucide-react";
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
@@ -26,6 +26,8 @@ const MENU_SECTIONS = [
     items: [
       { icon: MapPin, label: "Saved Addresses", path: "/addresses" },
       { icon: CreditCard, label: "Payment Methods", path: "/payment-methods" },
+      { icon: Wallet, label: "Wallet", path: "/wallet" },
+      { icon: ReceiptText, label: "GST Verification", path: "/verify-gst" },
       { icon: Bell, label: "Notifications", path: "/notifications" },
       { icon: KeyRound, label: "Change Password", action: "change_password" },
     ],

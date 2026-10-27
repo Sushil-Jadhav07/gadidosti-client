@@ -63,6 +63,8 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
   // disabled (shows a generic label) until this resolves, since there's no longer a client-side
   // formula to fall back on.
   const [advanceAmount, setAdvanceAmount] = useState(null);
+  const [walletBalance, setWalletBalance] = useState(null);
+  const [payingFromWallet, setPayingFromWallet] = useState(false);
   const [markingToBeBilled, setMarkingToBeBilled] = useState(false);
 
   // negotiate.stage: "set" (slider) -> "sent" (waiting on the driver for real — no fake reply)
@@ -148,6 +150,21 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.status, bookingId, request.amount]);
 
+  // Wallet balance for the "Pay from Wallet" button — same fetch-once-confirmed pattern as
+  // advanceAmount above.
+  useEffect(() => {
+    if (request.status !== "accepted") return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get("/api/wallet", token);
+        if (!cancelled && res?.success && res.data?.balance != null) setWalletBalance(Number(res.data.balance));
+      } catch { /* Pay from Wallet button just stays disabled if this fails */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.status]);
+
   const openNegotiate = () => {
     const base = Number(request.amount) || Number(askingPrice) || 0;
     const min = Math.round(base * 0.78);
@@ -214,6 +231,20 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
   const handlePayLater = () => {
     setShowPaymentSheet(false);
     setPaid(true);
+  };
+
+  // Internal debit, no gateway round-trip — see payFromWallet in booking.controller.js.
+  const handlePayFromWallet = async () => {
+    setPayingFromWallet(true);
+    try {
+      const res = await api.post(`/api/bookings/${bookingId}/pay/wallet`, { pay_type: "full" }, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to pay from wallet");
+      setPaid(true);
+    } catch (err) {
+      toast.error(err?.message || "Failed to pay from wallet");
+    } finally {
+      setPayingFromWallet(false);
+    }
   };
 
   // "To Be Billed" — the new third stage: nothing collected now, nothing collected on delivery
@@ -371,6 +402,17 @@ export default function RequestDriver({ bookingId, bookingNumber, askingPrice, p
                     {markingToBeBilled ? "..." : "To Be Billed"}
                   </button>
                 </div>
+                <button
+                  onClick={handlePayFromWallet}
+                  disabled={payingFromWallet || walletBalance == null || walletBalance < finalAmount}
+                  className="w-full py-3 bg-white border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-60 disabled:border-neutral-200 disabled:text-neutral-400"
+                >
+                  {payingFromWallet
+                    ? "Paying..."
+                    : walletBalance == null
+                    ? "Pay from Wallet…"
+                    : `Pay from Wallet (₹${walletBalance.toLocaleString("en-IN")})`}
+                </button>
               </div>
               <p className="text-xs text-neutral-400 mt-3">
                 <span className="font-medium text-neutral-500">To Pay</span> — pay in full when the vehicle is unloaded.{" "}
