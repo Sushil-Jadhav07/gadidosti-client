@@ -1,8 +1,9 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User, CalendarClock, Wallet } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User, CalendarClock, Wallet, Receipt } from "lucide-react";
+import { useBillingAccount } from "../context/BillingAccountContext";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { path: "/", label: "Home", Icon: Home },
   { path: "/book", label: "Book", Icon: PlusCircle },
   { path: "/bookings", label: "Bookings", Icon: ClipboardList },
@@ -12,15 +13,22 @@ const NAV_ITEMS = [
   { path: "/chats", label: "Chats", Icon: MessageCircle },
   { path: "/profile", label: "Profile", Icon: User },
 ];
+// Only ever relevant for a postpaid client — same reasoning as Sidebar.jsx.
+const BILLS_NAV_ITEM = { path: "/bills", label: "Bills", Icon: Receipt };
 
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
+  const { billingType } = useBillingAccount();
+
+  const navItems = billingType === "postpaid"
+    ? [...BASE_NAV_ITEMS.slice(0, -1), BILLS_NAV_ITEM, BASE_NAV_ITEMS[BASE_NAV_ITEMS.length - 1]]
+    : BASE_NAV_ITEMS;
 
   return (
     <nav className="md:hidden sticky bottom-0 left-0 right-0 z-50 bg-white shadow-nav pb-[env(safe-area-inset-bottom,0px)]">
-      {/* overflow-x-auto as a hard guarantee, not just a width budget — whatever 7 items at a
+      {/* overflow-x-auto as a hard guarantee, not just a width budget — whatever many items at a
           comfortable tap-target size add up to, this row can always reach every item by
           swiping instead of silently clipping/squishing the trailing ones off an exact-fit
           calculation that depends on the device's exact width. flex-shrink-0 + an explicit
@@ -28,7 +36,7 @@ export default function BottomNav() {
           shrink toward 0 to avoid ever overflowing, which is exactly what was squeezing/
           clipping labels instead of ever actually triggering this scroll. */}
       <div className="flex items-center justify-center w-full h-16 overflow-x-auto no-scrollbar">
-        {NAV_ITEMS.map(({ path, label, Icon }) => {
+        {navItems.map(({ path, label, Icon }) => {
           const isActive = currentPath === path;
           return (
             <button

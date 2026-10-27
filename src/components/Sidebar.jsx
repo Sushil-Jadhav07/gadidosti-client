@@ -1,11 +1,12 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle, CalendarClock, Wallet } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, User, LogOut, Bell, MessageCircle, CalendarClock, Wallet, Receipt } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useNotifications } from "../hooks/useNotifications";
 import { useChatUnread } from "../context/ChatUnreadContext";
+import { useBillingAccount } from "../context/BillingAccountContext";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { path: "/", label: "Dashboard", Icon: Home },
   { path: "/book", label: "Book a Truck", Icon: PlusCircle },
   { path: "/bookings", label: "My Bookings", Icon: ClipboardList },
@@ -14,6 +15,9 @@ const NAV_ITEMS = [
   { path: "/wallet", label: "Wallet", Icon: Wallet },
   { path: "/profile", label: "Profile", Icon: User },
 ];
+// Only ever relevant for a postpaid client — inserted conditionally below, never shown to the
+// (default) prepaid majority.
+const BILLS_NAV_ITEM = { path: "/bills", label: "My Bills", Icon: Receipt };
 
 // A normal, always-full-width, flush sidebar — no floating margins/rounded corners, no
 // hover-to-expand rail. Desktop-only (hidden md:flex) — mobile navigation is BottomNav alone
@@ -31,6 +35,11 @@ export default function Sidebar() {
   // since only unread_count (part of every response regardless of limit) is actually used.
   const { unreadCount } = useNotifications({ limit: 1 });
   const { unreadCount: chatUnread } = useChatUnread();
+  const { billingType } = useBillingAccount();
+
+  const navItems = billingType === "postpaid"
+    ? [...BASE_NAV_ITEMS.slice(0, -1), BILLS_NAV_ITEM, BASE_NAV_ITEMS[BASE_NAV_ITEMS.length - 1]]
+    : BASE_NAV_ITEMS;
 
   const handleLogout = async () => {
     await logout();
@@ -57,7 +66,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-5 space-y-0.5 overflow-y-auto">
         <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-3 mb-3">Menu</p>
-        {NAV_ITEMS.map(({ path, label, Icon }) => {
+        {navItems.map(({ path, label, Icon }) => {
           const isActive = currentPath === path;
           return (
             <button

@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ChatUnreadProvider } from "./context/ChatUnreadContext";
 import { KycStatusProvider, useKycStatus } from "./context/KycStatusContext";
+import { BillingAccountProvider } from "./context/BillingAccountContext";
 import usePushNotifications from "./hooks/usePushNotifications";
 import ChatNotificationListener from "./components/ChatNotificationListener";
 import ChatLauncher from "./components/ChatLauncher";
@@ -33,6 +34,7 @@ import MonthlyHiring from "./pages/MonthlyHiring";
 import MonthlyHiringForm from "./pages/MonthlyHiringForm";
 import Verification from "./pages/Verification";
 import Wallet from "./pages/Wallet";
+import MyBills from "./pages/MyBills";
 
 const PAGE_TITLES = {
   "/": "Dashboard",
@@ -49,6 +51,7 @@ const PAGE_TITLES = {
   "/monthly-hiring/new": "New Enquiry",
   "/verify": "Verification",
   "/wallet": "Wallet",
+  "/bills": "My Bills",
 };
 
 function WebLayout({ children, hideTopBar }) {
@@ -359,6 +362,20 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Deliberately NOT behind KycGate — paying down an outstanding bill should never be
+          blocked by KYC status. Only reachable/shown at all for a postpaid client (see
+          Sidebar.jsx/BottomNav.jsx's billingType check), but not route-guarded here either —
+          a client switched back to prepaid can still see their bill history. */}
+      <Route
+        path="/bills"
+        element={
+          <ProtectedRoute>
+            <WebLayout>
+              <MyBills />
+            </WebLayout>
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -369,6 +386,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <KycStatusProvider>
+        <BillingAccountProvider>
           <ChatUnreadProvider>
             <ToastProvider>
               <AppRoutes />
@@ -377,6 +395,7 @@ export default function App() {
               <SessionExpiredModal />
             </ToastProvider>
           </ChatUnreadProvider>
+        </BillingAccountProvider>
         </KycStatusProvider>
       </AuthProvider>
     </ErrorBoundary>
