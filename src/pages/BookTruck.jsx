@@ -6,7 +6,7 @@ import {
   Building2, Route, ArrowUpDown, Check, Truck,
   ArrowRight, ArrowLeft, ArrowDown, MapPin, Package, Weight, Hash, ClipboardList, Zap,
   Pencil, LocateFixed, Plus, X, PackagePlus, PackageMinus, Crosshair, Radar, CalendarClock, Ruler, Phone,
-  PackageOpen, PackageCheck,
+  PackageOpen, PackageCheck, User, Receipt,
 } from "lucide-react";
 import StepIndicator from "../components/StepIndicator";
 import PlacesAutocompleteInput from "../components/PlacesAutocompleteInput";
@@ -67,6 +67,16 @@ const INITIAL_FORM = {
   quantity: 1,
   materialType: "",
   notes: "",
+  // Who's liable for the freight's GST (RCM) — "self" (the client, default/unchanged) or
+  // "receiver", a named third party (see the picker just above Popular Cities on Step 1).
+  // billingPartyId is only set when an existing saved party was picked (vs typed fresh) —
+  // purely informational, the booking payload always sends the name+gstin either way.
+  billedTo: "self",
+  billingPartyId: null,
+  billingPartyName: "",
+  billingPartyGstin: "",
+  // Mandatory on Step 2 — see the field right under Material Type.
+  ewayBillNumber: "",
   truckType: null,
   // Part Truck only — optional "only match this size" filter on top of the broadcast (see
   // TruckModel.findPartTruckCandidates' category param on the backend). Null means any size.
@@ -248,6 +258,13 @@ export default function BookTruck() {
   // fetched once, same as cities/materialTypes below, just from a different endpoint since
   // these are per-client, not admin-configured.
   const [savedAddresses, setSavedAddresses] = useState([]);
+  // "Receiver Pays" saved parties — same reuse pattern as Saved Addresses just above. Fetched
+  // once; a client picks one of these or types a fresh name+GSTIN, which then gets auto-saved
+  // here server-side the moment the booking is created (see billingParty.controller.js).
+  const [savedBillingParties, setSavedBillingParties] = useState([]);
+  // Toggles the name/GSTIN inputs open — true when no saved parties exist yet, or the client
+  // explicitly tapped "+ Add New" instead of picking a saved chip.
+  const [addingNewBillingParty, setAddingNewBillingParty] = useState(false);
   const [materialTypes, setMaterialTypes] = useState(FALLBACK_MATERIALS);
   const [truckOptions, setTruckOptions] = useState(FALLBACK_TRUCKS);
   const [configError, setConfigError] = useState(false);
@@ -660,6 +677,13 @@ export default function BookTruck() {
       .catch(() => {});
   }, [token]);
 
+  // Saved "Receiver Pays" parties — same silent-on-failure fetch as Saved Addresses above.
+  useEffect(() => {
+    api.get("/api/billing-parties", token)
+      .then((res) => { if (res?.success) setSavedBillingParties(res.data?.parties || []); })
+      .catch(() => {});
+  }, [token]);
+
   // Live price estimate: refetch whenever the core fields change, regardless of step
   useEffect(() => {
     if (!form.truckType || !form.pickup || !form.drop || !form.transportType) {
@@ -912,6 +936,12 @@ export default function BookTruck() {
         quantity: form.quantity,
         material: form.materialType,
         notes: composedNotes || undefined,
+        billed_to: form.billedTo,
+        ...(form.billedTo === "receiver" ? {
+          billing_party_name: form.billingPartyName.trim(),
+          billing_party_gstin: form.billingPartyGstin.trim(),
+        } : {}),
+        eway_bill_number: form.ewayBillNumber.trim(),
         scheduled_date: isScheduled ? new Date(form.scheduledDateTime).toISOString() : new Date().toISOString(),
         ...(isScheduled ? { is_scheduled: true } : {}),
         distance: priceBreakdown.distance,
@@ -1020,20 +1050,29 @@ export default function BookTruck() {
     dispatch(clearWizardState());
   };
 
+  // Receiver Pays needs both fields actually filled in, not just the toggle flipped — same
+  // requirement the backend 422s on (BILLING_PARTY_REQUIRED).
+  const billingPartyValid = form.billedTo !== "receiver" || (!!form.billingPartyName.trim() && !!form.billingPartyGstin.trim());
+
   const canContinue =
-    (step === 1 && !!form.pickup && !!form.drop && !!form.transportType && scheduledDateTimeValid) ||
-    step === 2 ||
+    (step === 1 && !!form.pickup && !!form.drop && !!form.transportType && scheduledDateTimeValid && billingPartyValid) ||
+    (step === 2 && !!form.ewayBillNumber.trim()) ||
     (step === 3 && !!form.truckType && !!form.searchMode && (form.searchMode !== "broker" || !!form.selectedBrokerId)) ||
     (step === 4 && !!priceBreakdown?.total && !loadingQuote);
 
   // A disabled Continue button with no explanation just looks broken — this fills in exactly
-  // what's still missing on Step 3, where there are three independent things to pick (truck
-  // category, search mode, and — only in broker mode — a specific broker) and it's easy to do
-  // two of the three and not notice the third is still unset.
-  const step3MissingHint = step === 3 && !canContinue
-    ? (!form.truckType ? "Select a truck category to continue"
-      : !form.searchMode ? "Choose Find Truck or Search for Broker to continue"
-      : "Select a broker to continue")
+  // what's still missing — Step 3 has three independent things to pick (truck category, search
+  // mode, and — only in broker mode — a specific broker), and Step 1/2 each gained a field
+  // (Receiver Pays' name+GSTIN, the mandatory E-Way Bill) that's easy to miss without this.
+  const stepMissingHint = !canContinue
+    ? (step === 1 && form.billedTo === "receiver" && !billingPartyValid
+        ? "Enter the receiver's Supplier Name and GST Number to continue"
+      : step === 2 && !form.ewayBillNumber.trim() ? "Enter the E-Way Bill number to continue"
+      : step === 3
+        ? (!form.truckType ? "Select a truck category to continue"
+          : !form.searchMode ? "Choose Find Truck or Search for Broker to continue"
+          : "Select a broker to continue")
+        : null)
     : null;
 
   // No success screen here anymore — creating the booking just moves on to Choose Broker.
@@ -1664,6 +1703,113 @@ export default function BookTruck() {
                     </div>
                   )}
 
+                  {/* Who's liable for the freight's GST (RCM) — "You Pay" (the client
+                      themselves, default/unchanged) or "Receiver Pays", a named third party
+                      identified by Supplier Name + GST Number below. Whatever's entered for a
+                      receiver gets saved server-side the moment the booking is created (see
+                      billingParty.controller.js), so it's just a chip to pick next time instead
+                      of retyped. */}
+                  <div className="mb-4">
+                    <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Who Pays GST</p>
+                    <div className="flex items-center gap-1 mb-3 bg-neutral-50 rounded-full p-1 w-fit">
+                      <button
+                        type="button"
+                        onClick={() => updateForm("billedTo", "self")}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                          form.billedTo === "self" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                        }`}
+                      >
+                        <User className="w-3.5 h-3.5" /> You Pay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateForm("billedTo", "receiver")}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                          form.billedTo === "receiver" ? "bg-primary text-white" : "text-neutral-500 hover:text-primary"
+                        }`}
+                      >
+                        <Building2 className="w-3.5 h-3.5" /> Receiver Pays
+                      </button>
+                    </div>
+
+                    {form.billedTo === "receiver" && (
+                      <div className="border border-neutral-100 rounded-xl p-3 bg-neutral-50/60">
+                        {savedBillingParties.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {savedBillingParties.map((party) => {
+                              const isActive = !addingNewBillingParty && form.billingPartyId === party.id;
+                              return (
+                                <button
+                                  key={party.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setAddingNewBillingParty(false);
+                                    updateForm("billingPartyId", party.id);
+                                    updateForm("billingPartyName", party.name);
+                                    updateForm("billingPartyGstin", party.gstin);
+                                  }}
+                                  title={party.gstin}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                    isActive ? "bg-primary text-white" : "bg-white border border-neutral-200 text-neutral-600 hover:border-primary/40"
+                                  }`}
+                                >
+                                  <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                                  {party.name}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddingNewBillingParty(true);
+                                updateForm("billingPartyId", null);
+                                updateForm("billingPartyName", "");
+                                updateForm("billingPartyGstin", "");
+                              }}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                addingNewBillingParty ? "bg-primary text-white" : "bg-white border border-dashed border-neutral-300 text-neutral-500 hover:border-primary/40"
+                              }`}
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Add New
+                            </button>
+                          </div>
+                        )}
+
+                        {(addingNewBillingParty || savedBillingParties.length === 0 || !form.billingPartyId) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1 block">Supplier Name</label>
+                              <input
+                                type="text"
+                                value={form.billingPartyName}
+                                onChange={(e) => {
+                                  updateForm("billingPartyName", e.target.value);
+                                  updateForm("billingPartyId", null);
+                                }}
+                                placeholder="Receiver / consignee name"
+                                className="w-full bg-white border border-neutral-100 rounded-md px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1 block">GST Number</label>
+                              <input
+                                type="text"
+                                value={form.billingPartyGstin}
+                                onChange={(e) => {
+                                  updateForm("billingPartyGstin", e.target.value.toUpperCase());
+                                  updateForm("billingPartyId", null);
+                                }}
+                                placeholder="29AAICP2912R1ZR"
+                                maxLength={15}
+                                className="w-full bg-white border border-neutral-100 rounded-md px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all uppercase"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-widest mb-2">Popular Cities</p>
                     <div className="flex flex-wrap gap-1.5">
@@ -1743,6 +1889,27 @@ export default function BookTruck() {
                         value={form.materialType}
                         onChange={(v) => updateForm("materialType", v)}
                         placeholder="e.g. Electronics, Furniture, Textiles..."
+                      />
+                    </div>
+
+                    {/* E-Way Bill — mandatory for every booking (not threshold-based), same
+                        hard requirement server-side (see booking.controller.js's createBooking,
+                        EWAY_BILL_REQUIRED). */}
+                    <div className="p-3 md:p-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
+                          <Receipt className="w-3 h-3 text-primary" />
+                        </span>
+                        <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">
+                          E-Way Bill No. <span className="text-danger normal-case font-normal">(required)</span>
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        value={form.ewayBillNumber}
+                        onChange={(e) => updateForm("ewayBillNumber", e.target.value.trim())}
+                        placeholder="e.g. 123456789012"
+                        className="w-full bg-neutral-50 border border-neutral-100 rounded-md px-2.5 py-2 text-sm text-neutral-700 outline-none placeholder:text-neutral-300 focus:border-primary focus:shadow-[0_0_0_3px_rgba(22,101,52,0.1)] transition-all"
                       />
                     </div>
 
@@ -2391,7 +2558,7 @@ export default function BookTruck() {
                   Back/Next stay put without scrolling even while the step content above
                   scrolls internally. */}
               <div className="flex items-center gap-3 justify-between px-5 md:px-8 py-4 border-t border-neutral-100 flex-shrink-0">
-                <p className="text-xs text-neutral-400">{step3MissingHint}</p>
+                <p className="text-xs text-neutral-400">{stepMissingHint}</p>
                 <div className="flex gap-3">
                 {step > 1 && (
                   <button

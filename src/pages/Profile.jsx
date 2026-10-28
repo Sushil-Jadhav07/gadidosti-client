@@ -309,7 +309,7 @@ export default function Profile() {
             )}
           </div>
 
-          <p className="text-center text-[10px] text-neutral-300">SSK Logistics v1.0.0 — GadiDost</p>
+          <p className="text-center text-[10px] text-neutral-300">GadiDost v1.0.0</p>
         </div>
 
         {/* Right — Settings */}
