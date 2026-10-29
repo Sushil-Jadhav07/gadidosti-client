@@ -55,6 +55,8 @@ export default function BookingDetail() {
   const [loadingPod, setLoadingPod] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [sharingInvoice, setSharingInvoice] = useState(false);
+  const [downloadingBilty, setDownloadingBilty] = useState(false);
+  const [sendingBilty, setSendingBilty] = useState(false);
   const [sharingTracking, setSharingTracking] = useState(false);
   // Driver reassignment history — empty for the overwhelming majority of bookings (a broker only
   // reassigns mid-trip after an incident), so this is a separate, silent-on-failure fetch rather
@@ -254,6 +256,42 @@ export default function BookingDetail() {
       toast.error(err?.message || "Failed to download invoice");
     } finally {
       setDownloadingInvoice(false);
+    }
+  };
+
+  // Bilty (Lorry Receipt) — a separate document from the invoice (see gadidosti-backend's
+  // biltyPdf.js), already auto-emailed to the client the moment a trip is marked Delivered.
+  // This download button is just for viewing/printing a copy; the Resend button below calls the
+  // same one-click endpoint the auto-send uses — always to the client's own email, no compose
+  // sheet needed (unlike the invoice's Email Copy, which can go to anyone).
+  const handleDownloadBilty = async () => {
+    if (downloadingBilty || !booking) return;
+    setDownloadingBilty(true);
+    try {
+      const blobUrl = await api.getFileBlobUrl(`${API_BASE}/api/bookings/${booking.id}/bilty`, token);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `bilty-${bookingRef(booking)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      toast.error(err?.message || "Failed to download Bilty");
+    } finally {
+      setDownloadingBilty(false);
+    }
+  };
+
+  const handleSendBilty = async () => {
+    if (sendingBilty || !booking) return;
+    setSendingBilty(true);
+    try {
+      const res = await api.post(`/api/bookings/${booking.id}/bilty/send`, {}, token);
+      if (!res?.success) throw new Error(res?.message || "Failed to send Bilty");
+      toast.success("Bilty emailed to you");
+    } catch (err) {
+      toast.error(err?.message || "Failed to send Bilty");
+    } finally {
+      setSendingBilty(false);
     }
   };
 
@@ -712,6 +750,22 @@ export default function BookingDetail() {
                   >
                     <Share2 className="w-4 h-4 flex-shrink-0" />
                     {sharingInvoice ? "Preparing..." : "Share"}
+                  </button>
+                  <button
+                    onClick={handleDownloadBilty}
+                    disabled={downloadingBilty}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                  >
+                    <Truck className="w-4 h-4 flex-shrink-0" />
+                    {downloadingBilty ? "Downloading..." : "Download Bilty"}
+                  </button>
+                  <button
+                    onClick={handleSendBilty}
+                    disabled={sendingBilty}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-60"
+                  >
+                    <Mail className="w-4 h-4 flex-shrink-0" />
+                    {sendingBilty ? "Sending..." : "Resend Bilty"}
                   </button>
                 </>
               )}
