@@ -1,8 +1,11 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, User, CalendarClock, Wallet, Receipt } from "lucide-react";
+import { Home, PlusCircle, ClipboardList, MapPin, MessageCircle, CalendarClock, Wallet, Receipt } from "lucide-react";
 import { useBillingAccount } from "../context/BillingAccountContext";
 
+// No /profile entry here — that's reached via the avatar in TopBar.jsx now (always visible,
+// even on mobile, and a direct link straight to /profile rather than the dropdown it used to
+// open), not a duplicate second avatar/icon down here. One less item in an already-crowded row.
 const BASE_NAV_ITEMS = [
   { path: "/", label: "Home", Icon: Home },
   { path: "/book", label: "Book", Icon: PlusCircle },
@@ -11,7 +14,6 @@ const BASE_NAV_ITEMS = [
   { path: "/monthly-hiring", label: "Monthly", Icon: CalendarClock },
   { path: "/wallet", label: "Wallet", Icon: Wallet },
   { path: "/chats", label: "Chats", Icon: MessageCircle },
-  { path: "/profile", label: "Profile", Icon: User },
 ];
 // Only ever relevant for a postpaid client — same reasoning as Sidebar.jsx.
 const BILLS_NAV_ITEM = { path: "/bills", label: "Bills", Icon: Receipt };
@@ -22,9 +24,7 @@ export default function BottomNav() {
   const currentPath = location.pathname;
   const { billingType } = useBillingAccount();
 
-  const navItems = billingType === "postpaid"
-    ? [...BASE_NAV_ITEMS.slice(0, -1), BILLS_NAV_ITEM, BASE_NAV_ITEMS[BASE_NAV_ITEMS.length - 1]]
-    : BASE_NAV_ITEMS;
+  const navItems = billingType === "postpaid" ? [...BASE_NAV_ITEMS, BILLS_NAV_ITEM] : BASE_NAV_ITEMS;
 
   return (
     <nav className="md:hidden sticky bottom-0 left-0 right-0 z-50 bg-white shadow-nav pb-[env(safe-area-inset-bottom,0px)]">

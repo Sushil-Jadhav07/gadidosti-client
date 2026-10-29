@@ -48,6 +48,25 @@
     max-width: 100%;
   }
 
+  /* The actual root cause behind every one of those overflow fixes above: a flex/grid child's
+     browser default is `min-width: auto`, which means "never shrink below my own content's
+     natural size" — so one address string, booking ID, or label that doesn't happen to have a
+     wrap point was always free to push its whole row/column wider than its share, and from
+     there the page itself, no matter how many individual `min-w-0` classes got added to fix it
+     one component at a time. This resets that default for every flex/grid child project-wide,
+     so new components get the safe behavior (shrink to fit, text wraps/truncates normally)
+     without having to remember `min-w-0` on each one. Safe to do globally:
+       - An element with an explicit Tailwind width/min-width class (`w-9`, `min-w-[52px]`,
+         `min-w-fit`...) is unaffected — same specificity, and Tailwind's own utilities layer is
+         ordered after this `base` layer, so the explicit class still wins.
+       - `flex-shrink-0` children are unaffected either way — shrink-0 already means "never
+         shrink", independent of what the shrink floor would have been.
+       - Only changes the one failure mode this whole class of bug came from: content that
+         *should* wrap/truncate/shrink, but couldn't because nothing told it it was allowed to. */
+  .flex > *, .inline-flex > *, .grid > * {
+    min-width: 0;
+  }
+
   body {
     font-family: 'Inter', sans-serif;
     background-color: #F8FAFC;

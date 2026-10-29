@@ -34,8 +34,18 @@ export default function TopBar({ title }) {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Avatar + dropdown trigger */}
-        <div className="relative" ref={dropRef}>
+        {/* Mobile: the avatar alone, as a direct link straight to /profile — no dropdown. The
+            name/location text and the dropdown's "My Profile" entry are redundant with that one
+            tap, and "Sign Out" already has its own row on the Profile page itself. */}
+        <button
+          onClick={() => navigate("/profile")}
+          className="md:hidden w-8 h-8 rounded-full bg-primary/15 border-2 border-primary/25 flex items-center justify-center flex-shrink-0"
+        >
+          <span className="text-xs font-bold text-primary">{initials}</span>
+        </button>
+
+        {/* Desktop: the full dropdown trigger (name/location + My Profile/Sign Out menu). */}
+        <div className="relative hidden md:block" ref={dropRef}>
           <button
             onClick={() => setOpen((v) => !v)}
             className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-neutral-50 transition-colors"
