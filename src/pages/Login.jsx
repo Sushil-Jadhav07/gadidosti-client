@@ -4,6 +4,7 @@ import { Truck, Mail, MapPin, Package, Clock, ArrowRight, Eye, EyeOff, Lock, Ale
 import BottomSheet from "../components/BottomSheet";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { sendFirebaseOtp, resetRecaptcha } from "../lib/firebase";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
@@ -16,7 +17,7 @@ const FEATURES = [
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, googleLogin, sendLoginOtp, verifyLoginOtp, isAuthenticated, forgotPassword, resetPassword } = useAuth();
+  const { login, googleLogin, firebaseLogin, isAuthenticated, forgotPassword, resetPassword } = useAuth();
   const toast = useToast();
   // "password" (default, unchanged) or "otp" — a second way in, phone + OTP, no password
   // needed at all. Independent of the email/password fields below, which only the password
@@ -188,19 +189,37 @@ export default function Login() {
     setOtpStage("phone");
     setOtpCode("");
     setOtpError("");
+    resetRecaptcha();
   };
+
+  // Firebase's own error codes aren't written for end users — translated to plain messages
+  // here rather than shown as-is (e.g. "Firebase: Error (auth/invalid-phone-number).").
+  const firebaseOtpErrorMessage = (err) => {
+    switch (err?.code) {
+      case "auth/invalid-phone-number": return "Enter a valid 10-digit phone number.";
+      case "auth/too-many-requests": return "Too many attempts — please wait a while before trying again.";
+      case "auth/invalid-verification-code": return "That code isn't right. Please check and try again.";
+      case "auth/code-expired": return "This code has expired — request a new one.";
+      default: return err?.message || "Something went wrong. Please try again.";
+    }
+  };
+
+  // Holds Firebase's confirmationResult between send and verify — an SDK object, not state
+  // (nothing about it should trigger a re-render, and it can't be serialized anyway).
+  const firebaseConfirmationRef = useRef(null);
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
     setOtpError("");
     setOtpSending(true);
     try {
-      await sendLoginOtp(otpPhone);
+      firebaseConfirmationRef.current = await sendFirebaseOtp(otpPhone);
       toast.success(`OTP sent to ${otpPhone}`);
       setOtpStage("code");
       setTimeout(() => otpCodeInputRef.current?.focus(), 50);
     } catch (err) {
-      setOtpError(err.message || "Failed to send OTP. Please try again.");
+      resetRecaptcha();
+      setOtpError(firebaseOtpErrorMessage(err));
     } finally {
       setOtpSending(false);
     }
@@ -211,11 +230,14 @@ export default function Login() {
     setOtpError("");
     setOtpVerifying(true);
     try {
-      const user = await verifyLoginOtp(otpPhone, otpCode);
+      if (!firebaseConfirmationRef.current) throw new Error("Please request a new OTP.");
+      const result = await firebaseConfirmationRef.current.confirm(otpCode);
+      const idToken = await result.user.getIdToken();
+      const user = await firebaseLogin(idToken);
       toast.success(`Welcome back, ${user.name}!`, "Login Successful");
       navigate("/");
     } catch (err) {
-      setOtpError(err.message || "Invalid or expired OTP. Please try again.");
+      setOtpError(firebaseOtpErrorMessage(err));
     } finally {
       setOtpVerifying(false);
     }
@@ -225,10 +247,11 @@ export default function Login() {
     setOtpError("");
     setOtpSending(true);
     try {
-      await sendLoginOtp(otpPhone);
+      resetRecaptcha();
+      firebaseConfirmationRef.current = await sendFirebaseOtp(otpPhone);
       toast.success("OTP resent");
     } catch (err) {
-      setOtpError(err.message || "Failed to resend OTP");
+      setOtpError(firebaseOtpErrorMessage(err));
     } finally {
       setOtpSending(false);
     }
@@ -336,6 +359,11 @@ export default function Login() {
                 OTP
               </button>
             </div>
+
+            {/* Firebase Phone Auth's required reCAPTCHA host — invisible (size: "invisible" in
+                lib/firebase.js), never shown to the user, but the element has to exist in the
+                DOM before sendFirebaseOtp's first call. */}
+            <div id="recaptcha-container" />
 
             {method === "password" ? (
               <form onSubmit={handleSubmit} className="space-y-4">

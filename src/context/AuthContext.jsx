@@ -106,19 +106,13 @@ export function AuthProvider({ children }) {
     return false;
   }, [session, persistSession]);
 
-  // Phone + OTP login — a second way in, alongside email+password and Google. Same
-  // POST /api/auth/otp/send /verify pair the Forgot Password flow already uses below, just
-  // purpose: "login" instead of "password_reset" (both already supported server-side; this is
-  // the first UI that actually exercises the login purpose).
-  const sendLoginOtp = useCallback(async (phone) => {
-    const data = await api.post("/api/auth/otp/send", { phone, purpose: "login" });
-    if (!data.success) throw new Error(data.message || "Failed to send OTP");
-    return data.data;
-  }, []);
-
-  const verifyLoginOtp = useCallback(async (phone, otp) => {
-    const data = await api.post("/api/auth/otp/verify", { phone, otp, purpose: "login" });
-    if (!data.success) throw new Error(data.message || "Invalid or expired OTP");
+  // Phone + OTP login via Firebase Phone Authentication — a second way in, alongside
+  // email+password and Google. Firebase's own SDK (see lib/firebase.js's sendFirebaseOtp) sends
+  // and verifies the OTP entirely client-side; this just hands the resulting ID token to the
+  // backend, which checks it and issues a normal session, same as every other login path here.
+  const firebaseLogin = useCallback(async (idToken) => {
+    const data = await api.post("/api/auth/firebase-login", { id_token: idToken });
+    if (!data.success) throw new Error(data.message || "Login failed");
     if (data.data.user.role !== "client") throw new Error("Not a client account. Please use the correct portal.");
     persistSession(data.data.user, data.data.tokens);
     return data.data.user;
@@ -155,8 +149,7 @@ export function AuthProvider({ children }) {
         isAuthenticated,
         login,
         googleLogin,
-        sendLoginOtp,
-        verifyLoginOtp,
+        firebaseLogin,
         register,
         updateProfile,
         changePassword,

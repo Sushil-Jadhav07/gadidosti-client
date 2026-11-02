@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getMessaging, isSupported, getToken, onMessage } from "firebase/messaging";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -80,4 +81,48 @@ export const listenForegroundMessages = async (callback) => {
   const messaging = await getMessagingInstance();
   if (!messaging) return () => {};
   return onMessage(messaging, callback);
+};
+
+// ─── Phone + OTP login (Firebase Phone Authentication) ────────────────────────
+// Entirely client-side — Firebase sends and verifies the OTP itself (not through our backend
+// at all); Login.jsx only hands the resulting ID token to POST /api/auth/firebase-login, which
+// checks it and issues a normal session. See AuthContext.jsx's firebaseLogin.
+
+let authInstance = null;
+const getAuthInstance = () => {
+  const firebaseApp = getFirebaseApp();
+  if (!firebaseApp) return null;
+  if (!authInstance) authInstance = getAuth(firebaseApp);
+  return authInstance;
+};
+
+// reCAPTCHA (invisible) is mandatory for Firebase Phone Auth — this is Google's own bot-
+// prevention requirement, not something our backend/UI can skip. One verifier is reused across
+// send attempts on the same page load; resetRecaptcha() below clears it after a failed send,
+// since an already-solved/expired challenge can't be reused for a retry.
+let recaptchaVerifier = null;
+const ensureRecaptcha = (containerId) => {
+  const auth = getAuthInstance();
+  if (!auth) return null;
+  if (!recaptchaVerifier) {
+    recaptchaVerifier = new RecaptchaVerifier(auth, containerId, { size: "invisible" });
+  }
+  return recaptchaVerifier;
+};
+
+export const resetRecaptcha = () => {
+  if (recaptchaVerifier) {
+    try { recaptchaVerifier.clear(); } catch { /* already torn down */ }
+    recaptchaVerifier = null;
+  }
+};
+
+// phone10Digit: plain 10-digit Indian number (no +91) — same format used everywhere else in
+// this app. Returns a confirmationResult; call .confirm(code) on it to verify and sign in
+// (see Login.jsx's handleVerifyOtp), which also returns the Firebase user/ID token.
+export const sendFirebaseOtp = async (phone10Digit, containerId = "recaptcha-container") => {
+  const auth = getAuthInstance();
+  if (!auth) throw new Error("Phone verification is not configured in this environment");
+  const verifier = ensureRecaptcha(containerId);
+  return signInWithPhoneNumber(auth, `+91${phone10Digit}`, verifier);
 };
