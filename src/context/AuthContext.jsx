@@ -106,6 +106,24 @@ export function AuthProvider({ children }) {
     return false;
   }, [session, persistSession]);
 
+  // Phone + OTP login — a second way in, alongside email+password and Google. Same
+  // POST /api/auth/otp/send /verify pair the Forgot Password flow already uses below, just
+  // purpose: "login" instead of "password_reset" (both already supported server-side; this is
+  // the first UI that actually exercises the login purpose).
+  const sendLoginOtp = useCallback(async (phone) => {
+    const data = await api.post("/api/auth/otp/send", { phone, purpose: "login" });
+    if (!data.success) throw new Error(data.message || "Failed to send OTP");
+    return data.data;
+  }, []);
+
+  const verifyLoginOtp = useCallback(async (phone, otp) => {
+    const data = await api.post("/api/auth/otp/verify", { phone, otp, purpose: "login" });
+    if (!data.success) throw new Error(data.message || "Invalid or expired OTP");
+    if (data.data.user.role !== "client") throw new Error("Not a client account. Please use the correct portal.");
+    persistSession(data.data.user, data.data.tokens);
+    return data.data.user;
+  }, [persistSession]);
+
   const forgotPassword = useCallback(async (phone) => {
     const data = await api.post("/api/auth/forgot-password", { phone });
     if (!data.success) throw new Error(data.message || "Phone number not found");
@@ -137,6 +155,8 @@ export function AuthProvider({ children }) {
         isAuthenticated,
         login,
         googleLogin,
+        sendLoginOtp,
+        verifyLoginOtp,
         register,
         updateProfile,
         changePassword,

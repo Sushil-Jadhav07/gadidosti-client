@@ -16,8 +16,12 @@ const FEATURES = [
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, googleLogin, isAuthenticated, forgotPassword, resetPassword } = useAuth();
+  const { login, googleLogin, sendLoginOtp, verifyLoginOtp, isAuthenticated, forgotPassword, resetPassword } = useAuth();
   const toast = useToast();
+  // "password" (default, unchanged) or "otp" — a second way in, phone + OTP, no password
+  // needed at all. Independent of the email/password fields below, which only the password
+  // method uses.
+  const [method, setMethod] = useState("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -27,6 +31,18 @@ export default function Login() {
   const [shake, setShake] = useState(false);
   const emailInputRef = useRef(null);
   const googleBtnRef = useRef(null);
+
+  // OTP method's own state — "phone" stage (enter number, request a code) -> "code" stage
+  // (enter the 6-digit code, verify). Separate loading/error from the password form above so
+  // switching tabs never shows a stale spinner/error from the other method.
+  const [otpStage, setOtpStage] = useState("phone");
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const otpPhoneInputRef = useRef(null);
+  const otpCodeInputRef = useRef(null);
 
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
@@ -163,6 +179,61 @@ export default function Login() {
     }
   };
 
+  const switchMethod = (next) => {
+    setMethod(next);
+    setError("");
+    // Reset the OTP form back to its first stage on every tab switch — picking up mid-code
+    // entry after bouncing to Password and back would be confusing, and the code itself would
+    // likely have expired anyway by the time someone comes back to it.
+    setOtpStage("phone");
+    setOtpCode("");
+    setOtpError("");
+  };
+
+  const handleSendOtp = async (e) => {
+    e.preventDefault();
+    setOtpError("");
+    setOtpSending(true);
+    try {
+      await sendLoginOtp(otpPhone);
+      toast.success(`OTP sent to ${otpPhone}`);
+      setOtpStage("code");
+      setTimeout(() => otpCodeInputRef.current?.focus(), 50);
+    } catch (err) {
+      setOtpError(err.message || "Failed to send OTP. Please try again.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setOtpError("");
+    setOtpVerifying(true);
+    try {
+      const user = await verifyLoginOtp(otpPhone, otpCode);
+      toast.success(`Welcome back, ${user.name}!`, "Login Successful");
+      navigate("/");
+    } catch (err) {
+      setOtpError(err.message || "Invalid or expired OTP. Please try again.");
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setOtpError("");
+    setOtpSending(true);
+    try {
+      await sendLoginOtp(otpPhone);
+      toast.success("OTP resent");
+    } catch (err) {
+      setOtpError(err.message || "Failed to resend OTP");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex">
       {/* Left — Branding Panel */}
@@ -243,79 +314,211 @@ export default function Login() {
             <h2 className="font-poppins font-bold text-2xl text-neutral-800 mb-1 text-center">Welcome back</h2>
             <p className="text-sm text-neutral-400 mb-5 text-center">Sign in to manage your shipments</p>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
-                  Email Address
-                </label>
-                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
-                  <Mail className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
-                  <input
-                    ref={emailInputRef}
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email"
-                    required
-                    className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide">
-                    Password
-                  </label>
-                  <button type="button" onClick={openForgotSheet} className="text-xs font-semibold text-primary hover:underline">
-                    Forgot password?
-                  </button>
-                </div>
-                <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
-                  <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    required
-                    className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="ml-2 text-neutral-400 hover:text-neutral-600"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
-                </div>
-              )}
-
+            {/* Password vs OTP — two independent ways in, not a sub-step of each other.
+                Switching tabs resets the OTP form back to its first stage (see switchMethod). */}
+            <div className="flex bg-neutral-50 border border-neutral-100 rounded-xl p-1 mb-5">
               <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                type="button"
+                onClick={() => switchMethod("password")}
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  method === "password" ? "bg-white shadow-sm text-primary" : "text-neutral-500"
+                }`}
               >
-                {loading ? (
-                  <>
-                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Signing in...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Sign In</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
+                Password
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => switchMethod("otp")}
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  method === "otp" ? "bg-white shadow-sm text-primary" : "text-neutral-500"
+                }`}
+              >
+                OTP
+              </button>
+            </div>
+
+            {method === "password" ? (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
+                    Email Address
+                  </label>
+                  <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
+                    <Mail className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
+                    <input
+                      ref={emailInputRef}
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      required
+                      className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide">
+                      Password
+                    </label>
+                    <button type="button" onClick={openForgotSheet} className="text-xs font-semibold text-primary hover:underline">
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
+                    <Lock className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      required
+                      className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="ml-2 text-neutral-400 hover:text-neutral-600"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                >
+                  {loading ? (
+                    <>
+                      <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Signing in...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : otpStage === "phone" ? (
+              <form onSubmit={handleSendOtp} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">
+                    Phone Number
+                  </label>
+                  <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
+                    <Phone className="w-5 h-5 text-neutral-300 mr-2 flex-shrink-0" />
+                    <input
+                      ref={otpPhoneInputRef}
+                      type="tel"
+                      inputMode="numeric"
+                      value={otpPhone}
+                      onChange={(e) => setOtpPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      placeholder="Enter your registered phone number"
+                      required
+                      className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
+                    />
+                  </div>
+                </div>
+
+                {otpError && (
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {otpError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={otpSending || otpPhone.length !== 10}
+                  className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                >
+                  {otpSending ? (
+                    <>
+                      <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Sending OTP...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Send OTP</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide">
+                      Enter OTP
+                    </label>
+                    <button type="button" onClick={() => switchMethod("otp")} className="text-xs font-semibold text-primary hover:underline">
+                      Change number
+                    </button>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-2">We sent a code to {otpPhone}.</p>
+                  <div className="flex items-center bg-neutral-50 border border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary focus-within:shadow-[0_0_0_4px_rgba(22,101,52,0.1)] transition-all">
+                    <KeyRound className="w-5 h-5 text-neutral-300 mr-3 flex-shrink-0" />
+                    <input
+                      ref={otpCodeInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="6-digit code"
+                      required
+                      className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300 tracking-widest"
+                    />
+                  </div>
+                </div>
+
+                {otpError && (
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {otpError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={otpVerifying || otpCode.length !== 6}
+                  className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                >
+                  {otpVerifying ? (
+                    <>
+                      <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Verifying...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Verify &amp; Sign In</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={otpSending}
+                  className="w-full text-center text-xs font-semibold text-primary hover:underline disabled:opacity-50"
+                >
+                  {otpSending ? "Resending..." : "Resend OTP"}
+                </button>
+              </form>
+            )}
 
             {showGoogleBtn && (
               <>
