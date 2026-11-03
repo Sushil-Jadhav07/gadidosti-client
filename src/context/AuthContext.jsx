@@ -54,9 +54,9 @@ export function AuthProvider({ children }) {
     return data.data;
   }, []);
 
-  const updateProfile = useCallback(async ({ name, email, address, company_name }) => {
+  const updateProfile = useCallback(async ({ name, email, phone, address, company_name }) => {
     if (!session?.tokens) throw new Error("Not authenticated");
-    const data = await api.patch("/api/users/profile", { name, email, address, company_name }, session.tokens.access_token);
+    const data = await api.patch("/api/users/profile", { name, email, phone, address, company_name }, session.tokens.access_token);
     if (!data.success) throw new Error(data.message || "Failed to update profile");
     persistSession(data.data.user, session.tokens);
     return data.data.user;

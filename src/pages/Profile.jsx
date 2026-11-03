@@ -92,7 +92,7 @@ export default function Profile() {
 
   // ── Edit profile ──
   const [showEditSheet, setShowEditSheet] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", email: "", address: "", company_name: "" });
+  const [editForm, setEditForm] = useState({ name: "", email: "", phone: "", address: "", company_name: "" });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
@@ -100,6 +100,7 @@ export default function Profile() {
     setEditForm({
       name: user?.name || "",
       email: user?.email || "",
+      phone: user?.phone || "",
       address: user?.address || "",
       company_name: user?.company_name || "",
     });
@@ -109,6 +110,10 @@ export default function Profile() {
 
   const handleSaveProfile = async () => {
     setEditError("");
+    if (editForm.phone && !/^\d{10}$/.test(editForm.phone)) {
+      setEditError("Phone number must be exactly 10 digits");
+      return;
+    }
     setEditSaving(true);
     try {
       await updateProfile(editForm);
@@ -451,6 +456,20 @@ export default function Profile() {
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="flex-1 bg-transparent text-sm text-neutral-800 outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-1.5">Phone Number</label>
+            <div className="flex items-center bg-neutral-50 border-2 border-neutral-100 rounded-xl px-4 py-3 focus-within:border-primary transition-all">
+              <Phone className="w-4 h-4 text-neutral-300 mr-3 flex-shrink-0" />
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={editForm.phone}
+                onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+                placeholder="10-digit phone number"
+                className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300"
               />
             </div>
           </div>
