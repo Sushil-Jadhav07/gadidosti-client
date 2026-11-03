@@ -48,8 +48,10 @@ export function AuthProvider({ children }) {
     return { user: data.data.user, needs_phone: !!data.data.needs_phone };
   }, [persistSession]);
 
-  const register = useCallback(async ({ name, email, phone, password }) => {
-    const data = await api.post("/api/auth/register", { name, email, phone: phone || undefined, password, role: "client" });
+  // id_token: the Firebase ID token from verifying `phone` via OTP (see Register.jsx's
+  // handleVerifyOtp) — now required server-side, phone verification isn't optional anymore.
+  const register = useCallback(async ({ name, email, phone, password, id_token }) => {
+    const data = await api.post("/api/auth/register", { name, email, phone, password, role: "client", id_token });
     if (!data.success) throw new Error(data.message || "Registration failed");
     return data.data;
   }, []);
