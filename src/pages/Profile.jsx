@@ -213,22 +213,34 @@ export default function Profile() {
             />
 
             <div className="relative z-10 p-6 text-center">
-              {/* Avatar */}
-              <div className="w-20 h-20 rounded-full bg-primary/25 border-[3px] border-primary/40 flex items-center justify-center shadow-glow-blue mx-auto mb-4">
-                <span className="font-poppins font-bold text-2xl text-white">{initials}</span>
+              {/* Avatar — real photo when the account has one (e.g. from Google Sign-In), initials otherwise */}
+              <div className="w-20 h-20 rounded-full bg-primary/25 border-[3px] border-primary/40 flex items-center justify-center shadow-glow-blue mx-auto mb-4 overflow-hidden">
+                {profileData?.profile_image ? (
+                  <img src={profileData.profile_image} alt={profileData.name || "Profile"} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="font-poppins font-bold text-2xl text-white">{initials}</span>
+                )}
               </div>
 
               <h2 className="font-poppins font-semibold text-xl text-white mb-1">
                 {profileData?.name || "—"}
               </h2>
 
-              <div className="flex items-center justify-center gap-1.5 mb-1">
-                <Phone className="w-3 h-3 text-white/50" />
-                <span className="text-xs text-white/50">{profileData?.phone || "Not provided"}</span>
-              </div>
-              <div className="flex items-center justify-center gap-1.5 mb-4">
-                <Mail className="w-3 h-3 text-white/50" />
-                <span className="text-xs text-white/50">{profileData?.email || "Not provided"}</span>
+              <div className="space-y-1 mb-4">
+                <div className="flex items-center justify-center gap-1.5">
+                  <Phone className="w-3 h-3 text-white/50" />
+                  <span className="text-xs text-white/50">{profileData?.phone || "Not provided"}</span>
+                </div>
+                <div className="flex items-center justify-center gap-1.5">
+                  <Mail className="w-3 h-3 text-white/50" />
+                  <span className="text-xs text-white/50">{profileData?.email || "Not provided"}</span>
+                </div>
+                {profileData?.company_name && (
+                  <div className="flex items-center justify-center gap-1.5">
+                    <Building2 className="w-3 h-3 text-white/50" />
+                    <span className="text-xs text-white/50">{profileData.company_name}</span>
+                  </div>
+                )}
               </div>
 
               <button
