@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ReceiptText, FileText, Fingerprint, ShieldCheck, ShieldAlert, Loader2, ScanLine } from "lucide-react";
+import { ArrowLeft, ReceiptText, FileText, Fingerprint, ShieldCheck, ShieldAlert, Loader2, ScanLine, LayoutDashboard, LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useKycStatus } from "../context/KycStatusContext";
@@ -28,7 +28,7 @@ const verifyBtnCls = "flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounde
 // in booking.controller.js's createBooking.
 export default function Verification() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const toast = useToast();
   const token = getToken();
   const { refresh: refreshGlobalKycStatus } = useKycStatus();
@@ -167,6 +167,11 @@ export default function Verification() {
   // nothing extra to type.
   const showPanFallback = ["idle", "missing", "failed", "error"].includes(pan.status);
 
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
   return (
     <div className="p-4 md:p-8 animate-page-enter max-w-2xl mx-auto">
       <div className="flex items-start gap-3 mb-6">
@@ -195,6 +200,12 @@ export default function Verification() {
           <p className="text-sm text-neutral-400 mb-6">PAN, Aadhaar and GST are all confirmed — you're all set.</p>
           <button onClick={() => navigate("/book")} className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-xl transition-colors">
             Book a Truck
+          </button>
+          <button onClick={() => navigate("/")} className="w-full mt-3 bg-white border border-neutral-200 text-neutral-700 font-semibold py-3 rounded-xl hover:bg-neutral-50 transition-colors flex items-center justify-center gap-2">
+            <LayoutDashboard className="w-4 h-4" /> Back to Dashboard
+          </button>
+          <button onClick={handleLogout} className="w-full mt-3 text-neutral-500 hover:text-danger font-semibold py-2 transition-colors flex items-center justify-center gap-2">
+            <LogOut className="w-4 h-4" /> Log Out
           </button>
         </div>
       ) : (
