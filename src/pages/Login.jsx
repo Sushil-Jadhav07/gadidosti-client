@@ -200,7 +200,13 @@ export default function Login() {
       case "auth/too-many-requests": return "Too many attempts — please wait a while before trying again.";
       case "auth/invalid-verification-code": return "That code isn't right. Please check and try again.";
       case "auth/code-expired": return "This code has expired — request a new one.";
-      default: return err?.message || "Something went wrong. Please try again.";
+      // Never surface err.message here — it's raw Firebase/Play Integrity SDK text (e.g.
+      // "This app is not authorized to use Firebase Authentication... SHA-256...") that leaks
+      // which third-party auth provider we use straight into a production error banner. Logged
+      // to the console instead, for anyone actually debugging, never rendered.
+      default:
+        console.error("Phone verification error:", err);
+        return "Something went wrong verifying your phone. Please try again in a moment.";
     }
   };
 
