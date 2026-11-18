@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ReceiptText, FileText, Fingerprint, ShieldCheck, ShieldAlert, Loader2, ScanLine, LayoutDashboard, LogOut } from "lucide-react";
+import { ArrowLeft, ReceiptText, FileText, Fingerprint, ShieldCheck, ShieldAlert, Loader2, ScanLine, LayoutDashboard, LogOut, KeyRound } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useKycStatus } from "../context/KycStatusContext";
@@ -8,6 +8,7 @@ import { api, getToken } from "../services/api";
 
 const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i;
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/i;
+const AADHAAR_REGEX = /^\d{12}$/;
 const VERIFICATION_VALUES_KEY = "ssk_client_verification_values";
 
 function Badge({ status, message }) {
@@ -41,6 +42,16 @@ export default function Verification() {
   const [pan, setPan] = useState({ status: "idle" });
   const [aadhaar, setAadhaar] = useState({ status: "idle" });
   const [dgLoading, setDgLoading] = useState(false);
+
+  // Manual Aadhaar fallback (OTP to the Aadhaar-linked mobile) — DigiLocker only has Aadhaar if
+  // the user previously linked it there, which plenty of people never do even though PAN often
+  // ends up linked. Without this, "missing" from DigiLocker was a dead end: no other way on this
+  // page to ever complete Aadhaar, permanently blocking the rest of the app for that person.
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
+  const [aadhaarOtpStage, setAadhaarOtpStage] = useState("idle"); // idle -> sent
+  const [aadhaarOtpCode, setAadhaarOtpCode] = useState("");
+  const [aadhaarRefId, setAadhaarRefId] = useState(null);
+  const [sendingAadhaarOtp, setSendingAadhaarOtp] = useState(false);
 
   const fetchStatus = async ({ silent } = {}) => {
     if (!silent) setLoading(true);
@@ -162,10 +173,45 @@ export default function Verification() {
     }
   };
 
+  const sendAadhaarOtp = async () => {
+    const trimmed = aadhaarNumber.trim();
+    if (!AADHAAR_REGEX.test(trimmed)) {
+      toast.error("Enter a valid 12-digit Aadhaar number");
+      return;
+    }
+    setSendingAadhaarOtp(true);
+    try {
+      const res = await api.post("/api/kyc/verify/aadhaar/send-otp", { aadhaar_number: trimmed }, token);
+      if (!res?.success) throw new Error(res?.message);
+      setAadhaarRefId(res.data.refId);
+      setAadhaarOtpStage("sent");
+    } catch (err) {
+      toast.error(err.message || "Failed to send OTP");
+    } finally {
+      setSendingAadhaarOtp(false);
+    }
+  };
+
+  const verifyAadhaarOtpCode = async () => {
+    if (!aadhaarOtpCode.trim()) return;
+    setAadhaar({ status: "loading" });
+    try {
+      const res = await api.post("/api/kyc/verify/aadhaar/verify-otp", { ref_id: aadhaarRefId, otp: aadhaarOtpCode.trim() }, token);
+      if (!res?.success) throw new Error(res?.message);
+      setAadhaar({ status: res.data.status, message: res.data.details?.message });
+      setAadhaarOtpStage("idle");
+      setAadhaarOtpCode("");
+      await fetchStatus({ silent: true });
+    } catch (err) {
+      setAadhaar({ status: "error", message: err.message });
+    }
+  };
+
   // PAN's manual fallback only shows once DigiLocker either hasn't been tried yet or couldn't
   // supply it — not up front, so the primary path (one DigiLocker tap covers PAN + Aadhaar) has
   // nothing extra to type.
   const showPanFallback = ["idle", "missing", "failed", "error"].includes(pan.status);
+  const showAadhaarFallback = ["idle", "missing", "failed", "error"].includes(aadhaar.status);
 
   const handleLogout = async () => {
     await logout();
@@ -232,6 +278,59 @@ export default function Verification() {
                 </button>
               )}
             </div>
+
+            {/* Aadhaar manual fallback — only Aadhaar's own OTP flow, not PAN's, since DigiLocker
+                verifies them together but can independently come back "missing" for just one. */}
+            {showAadhaarFallback && (
+              <div className="bg-neutral-50 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Fingerprint className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+                  <p className="text-xs font-semibold text-neutral-500">Aadhaar not in your DigiLocker? Verify with OTP instead</p>
+                </div>
+                {aadhaarOtpStage === "idle" ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={aadhaarNumber}
+                      onChange={(e) => setAadhaarNumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                      placeholder="12-digit Aadhaar number"
+                      maxLength={12}
+                      className="flex-1 min-w-0 bg-white border-2 border-neutral-100 rounded-lg px-3 py-2.5 text-sm text-neutral-800 outline-none focus:border-primary placeholder:text-neutral-300"
+                    />
+                    <button type="button" onClick={sendAadhaarOtp} disabled={aadhaarNumber.length !== 12 || sendingAadhaarOtp} className={verifyBtnCls}>
+                      {sendingAadhaarOtp ? "Sending..." : "Send OTP"}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-neutral-400">OTP sent to the mobile number linked to this Aadhaar.</p>
+                      <button type="button" onClick={() => { setAadhaarOtpStage("idle"); setAadhaarOtpCode(""); }} className="text-xs font-semibold text-primary hover:underline flex-shrink-0">
+                        Change number
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white border-2 border-neutral-100 rounded-lg px-3 py-2.5">
+                      <KeyRound className="w-4 h-4 text-neutral-300 flex-shrink-0" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={aadhaarOtpCode}
+                        onChange={(e) => setAadhaarOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        placeholder="6-digit OTP"
+                        className="flex-1 min-w-0 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-300 tracking-widest"
+                      />
+                      <button type="button" onClick={verifyAadhaarOtpCode} disabled={aadhaarOtpCode.length !== 6 || aadhaar.status === "loading"} className="px-3 py-1.5 bg-primary hover:bg-primary-dark text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 whitespace-nowrap">
+                        Verify
+                      </button>
+                    </div>
+                    <button type="button" onClick={sendAadhaarOtp} disabled={sendingAadhaarOtp} className="text-xs font-semibold text-primary hover:underline mt-2 disabled:opacity-50">
+                      {sendingAadhaarOtp ? "Resending..." : "Resend OTP"}
+                    </button>
+                  </>
+                )}
+                {aadhaar.status === "error" && <div className="mt-2"><Badge status={aadhaar.status} message={aadhaar.message} /></div>}
+              </div>
+            )}
 
             {/* PAN manual fallback */}
             {showPanFallback && (
