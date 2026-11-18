@@ -36,6 +36,10 @@ export default function Verification() {
 
   const [kycStatus, setKycStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Either path is enough — backend's isKycSatisfied (kyc.controller.js) only requires
+  // (Aadhaar + PAN) together OR GST alone, not all three — so the UI presents them as two
+  // choices instead of one long checklist everyone has to fully complete.
+  const [activeTab, setActiveTab] = useState("identity"); // "identity" | "gst"
   const [gstin, setGstin] = useState("");
   const [panNumber, setPanNumber] = useState("");
   const [gst, setGst] = useState({ status: "idle" });
@@ -229,7 +233,7 @@ export default function Verification() {
         </button>
         <div className="min-w-0">
           <h1 className="font-poppins font-bold text-2xl text-neutral-800">Verification</h1>
-          <p className="text-sm text-neutral-400 mt-0.5">PAN, Aadhaar and GST — required once before you can use most of the app.</p>
+          <p className="text-sm text-neutral-400 mt-0.5">Verify Aadhaar + PAN, or GST — whichever is easier for you. Required once before you can use most of the app.</p>
         </div>
       </div>
 
@@ -243,7 +247,7 @@ export default function Verification() {
             <ShieldCheck className="w-7 h-7 text-success" />
           </div>
           <h3 className="font-poppins font-semibold text-lg text-neutral-800 mb-1">You're verified</h3>
-          <p className="text-sm text-neutral-400 mb-6">PAN, Aadhaar and GST are all confirmed — you're all set.</p>
+          <p className="text-sm text-neutral-400 mb-6">Your verification is complete — you're all set.</p>
           <button onClick={() => navigate("/book")} className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-xl transition-colors">
             Book a Truck
           </button>
@@ -260,8 +264,23 @@ export default function Verification() {
             <ScanLine size={16} className="text-primary" />
             <h3 className="font-bold text-slate-900 text-[15px]">Automated Verification</h3>
           </div>
-          <p className="text-xs text-neutral-400 mb-5">All three are required to unlock the app.</p>
+          <p className="text-xs text-neutral-400 mb-5">Complete either one of these — not both — to unlock the app.</p>
 
+          <div className="flex rounded-xl bg-neutral-100 p-1 mb-5 gap-1">
+            {[
+              { id: "identity", label: "Aadhaar + PAN" },
+              { id: "gst", label: "GST" },
+            ].map(({ id, label }) => (
+              <button key={id} type="button" onClick={() => setActiveTab(id)}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  activeTab === id ? "bg-white shadow text-primary" : "text-neutral-500 hover:text-neutral-700"
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "identity" ? (
           <div className="space-y-3">
             {/* Aadhaar + PAN via DigiLocker — the primary path */}
             <div className="bg-neutral-50 rounded-xl p-4 flex items-center justify-between gap-3">
@@ -355,7 +374,9 @@ export default function Verification() {
                 {pan.status !== "idle" && <div className="mt-2"><Badge status={pan.status} message={pan.message} /></div>}
               </div>
             )}
-
+          </div>
+          ) : (
+          <div className="space-y-3">
             {/* GST — always manual, no DigiLocker document for it */}
             <div className="bg-neutral-50 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2.5">
@@ -378,6 +399,7 @@ export default function Verification() {
               <div className="mt-2"><Badge status={gst.status} message={gst.message} /></div>
             </div>
           </div>
+          )}
         </div>
       )}
     </div>
