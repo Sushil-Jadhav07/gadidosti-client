@@ -622,11 +622,17 @@ export default function BookTruck() {
 
   // Pickup defaults to the client's own live location the moment it's known — mirrors how most
   // ride-hailing apps start the pickup pin at "where you are" rather than an empty field, while
-  // still leaving it fully draggable/editable from there. Only fires once (guarded on
-  // form.pickup being empty) — never overrides an address the client already typed, searched,
-  // tapped, or dragged in.
+  // still leaving it fully draggable/editable from there. Meant to only fire once — but the
+  // original guard was just "form.pickup is empty," which re-fires on every empty state, not
+  // only the first: myLocation keeps updating continuously (the watchPosition effect above), so
+  // clearing the field with PlacesAutocompleteInput's own "X" button made it immediately
+  // snap back to the current-location address, making Clear look broken. The ref below makes
+  // this genuinely one-shot — it never re-fills after a deliberate clear.
+  const autoFilledPickupRef = useRef(false);
   useEffect(() => {
     if (step !== 1 || form.pickup || !myLocation || !mapsLoaded || !window.google?.maps) return;
+    if (autoFilledPickupRef.current) return;
+    autoFilledPickupRef.current = true;
     let cancelled = false;
     (async () => {
       try {
