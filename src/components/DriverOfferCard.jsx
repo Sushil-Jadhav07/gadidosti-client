@@ -35,7 +35,12 @@ export default function DriverOfferCard({ request, askingPrice, onChange }) {
 
   const isYourTurnToConfirm = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "respondent";
   const isWaitingOnThem = request.status === "awaiting_confirmation" && request.pendingConfirmationBy === "client";
-  const canCounter = request.status === "pending" || request.status === "countered";
+  // A broker-assigned or admin-assigned driver_request can end up in this same fan-out list
+  // (nothing filters driver_requests by origin before showing it here) — the backend rejects a
+  // client-counter on either with a 409 (driverRequest.controller.js's isDirectAssignment), so
+  // this hides the button to match rather than letting the client hit that error.
+  const noNegotiation = !!request.noNegotiation;
+  const canCounter = !noNegotiation && (request.status === "pending" || request.status === "countered");
 
   // The "Your offer was sent" panel (negotiate.stage === "sent") is local UI state, not derived
   // from request.status — so once the driver actually replies (status moves off "pending", the
@@ -241,6 +246,11 @@ export default function DriverOfferCard({ request, askingPrice, onChange }) {
               Decline
             </button>
           </div>
+          {noNegotiation && (
+            <p className="text-[11px] text-neutral-400 text-center mt-2">
+              {request.isAdminAssigned ? "Assigned directly — fixed price, no negotiation." : "Already agreed with the broker — fixed price, no negotiation."}
+            </p>
+          )}
         </>
       )}
 
