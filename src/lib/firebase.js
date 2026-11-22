@@ -39,8 +39,14 @@ const getMessagingInstance = async () => {
 // hiding these), but they do vary per environment — passed as query params on registration
 // so the static public/firebase-messaging-sw.js file can read them at runtime instead of
 // needing them hardcoded at build time.
-const registerServiceWorker = async () => {
-  if (!("serviceWorker" in navigator)) return null;
+//
+// Exported and called unconditionally from main.jsx (not just from requestFcmToken below) —
+// Chrome's install-as-PWA prompt needs an active service worker controlling the page, and
+// that shouldn't depend on whether the user has granted notification permission yet. Calling
+// register() again later with this same URL (inside requestFcmToken) is a no-op that returns
+// the existing registration rather than installing a second worker.
+export const registerServiceWorker = async () => {
+  if (!isConfigured || !("serviceWorker" in navigator)) return null;
   try {
     const params = new URLSearchParams(firebaseConfig);
     return await navigator.serviceWorker.register(`/firebase-messaging-sw.js?${params.toString()}`);

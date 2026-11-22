@@ -5,6 +5,13 @@ import { Provider } from 'react-redux'
 import { store } from './store/store'
 import App from './App'
 import './index.css'
+import { registerServiceWorker } from './lib/firebase'
+
+// Registered unconditionally (not gated behind login or notification permission) so the app
+// has an active service worker from first visit — that's what makes Chrome/Edge offer the
+// "Install app" prompt. requestFcmToken() (src/hooks/usePushNotifications.js) re-registers the
+// same URL later, which is a no-op once this has already run.
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
