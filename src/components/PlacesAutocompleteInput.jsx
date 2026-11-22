@@ -167,8 +167,24 @@ export default function PlacesAutocompleteInput({ value, onChange, onPlaceSelect
           || components.find((c) => c.types?.includes("administrative_area_level_2"))?.longText
           || null;
         // Used by the geofencing pincode-whitelist check at booking time (see BookTruck.jsx) —
-        // null here if Google doesn't return a postal_code component for this address.
-        const pincode = components.find((c) => c.types?.includes("postal_code"))?.longText || null;
+        // null here if Google doesn't return a postal_code component for this address. Landmarks
+        // and other POI results (e.g. "India Gate", "Red Fort") are commonly missing postal_code
+        // in their own addressComponents even though a street address at the same spot would have
+        // one — fall back to reverse-geocoding the place's own coordinates, which resolves to a
+        // street-level result that does carry a postal_code, rather than forcing the client to
+        // separately type a pincode just because they picked a named place.
+        let pincode = components.find((c) => c.types?.includes("postal_code"))?.longText || null;
+        if (!pincode) {
+          try {
+            const geocoder = new window.google.maps.Geocoder();
+            const { results } = await geocoder.geocode({ location: place.location });
+            const fallbackComponents = results?.[0]?.address_components || [];
+            pincode = fallbackComponents.find((c) => c.types?.includes("postal_code"))?.long_name || null;
+          } catch {
+            // Leave pincode null — the booking-time geofence check surfaces this clearly if a
+            // whitelist is configured, rather than failing silently here.
+          }
+        }
         onPlaceSelect?.({
           address: stripCountrySuffix(place.formattedAddress || placePrediction.text?.text),
           lat: place.location.lat(),
