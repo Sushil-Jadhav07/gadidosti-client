@@ -29,7 +29,7 @@ import { GOOGLE_MAPS_SCRIPT_ID, GOOGLE_MAPS_LIBRARIES } from "../lib/googleMaps"
 // booking.controller.js DEFAULT_BROADCAST_RADIUS_KM) — mirrored here purely so the slider
 // starts wherever an omitted radius would resolve to server-side, not because the client needs
 // to omit it (the new UI always sends search_radius_km explicitly in "truck" mode).
-const DEFAULT_SEARCH_RADIUS_KM = 15;
+const DEFAULT_SEARCH_RADIUS_KM = 50;
 
 // GET /api/vehicles/trucks/nearby's own comment: movement isn't pushed live (DB-only writes,
 // no socket) — re-poll periodically while Step 3's map is actually showing these trucks.
