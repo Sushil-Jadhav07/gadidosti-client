@@ -1062,18 +1062,18 @@ export default function BookTruck() {
 
   const canContinue =
     (step === 1 && !!form.pickup && !!form.drop && !!form.transportType && scheduledDateTimeValid && billingPartyValid) ||
-    (step === 2 && !!form.ewayBillNumber.trim()) ||
+    step === 2 ||
     (step === 3 && !!form.truckType && !!form.searchMode && (form.searchMode !== "broker" || !!form.selectedBrokerId)) ||
     (step === 4 && !!priceBreakdown?.total && !loadingQuote);
 
   // A disabled Continue button with no explanation just looks broken — this fills in exactly
   // what's still missing — Step 3 has three independent things to pick (truck category, search
-  // mode, and — only in broker mode — a specific broker), and Step 1/2 each gained a field
-  // (Receiver Pays' name+GSTIN, the mandatory E-Way Bill) that's easy to miss without this.
+  // mode, and — only in broker mode — a specific broker), and Step 1 gained a field (Receiver
+  // Pays' name+GSTIN) that's easy to miss without this. Step 2's E-Way Bill is optional now (see
+  // its own comment below) so it never blocks Continue.
   const stepMissingHint = !canContinue
     ? (step === 1 && form.billedTo === "receiver" && !billingPartyValid
         ? "Enter the receiver's Supplier Name and GST Number to continue"
-      : step === 2 && !form.ewayBillNumber.trim() ? "Enter the E-Way Bill number to continue"
       : step === 3
         ? (!form.truckType ? "Select a truck category to continue"
           : !form.searchMode ? "Choose Find Truck or Search for Broker to continue"
@@ -1898,16 +1898,18 @@ export default function BookTruck() {
                       />
                     </div>
 
-                    {/* E-Way Bill — mandatory for every booking (not threshold-based), same
-                        hard requirement server-side (see booking.controller.js's createBooking,
-                        EWAY_BILL_REQUIRED). */}
+                    {/* E-Way Bill — optional here (the client often doesn't have one yet this
+                        far ahead of pickup); the driver is required to supply one at pickup
+                        instead if it's still missing by then (see trip.controller.js's
+                        updateTripStatus). Kept here so a client who already has it can enter it
+                        now and skip being asked again later. */}
                     <div className="p-3 md:p-3.5">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="w-6 h-6 rounded-md bg-primary-50 flex items-center justify-center flex-shrink-0">
                           <Receipt className="w-3 h-3 text-primary" />
                         </span>
                         <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide">
-                          E-Way Bill No. <span className="text-danger normal-case font-normal">(required)</span>
+                          E-Way Bill No. <span className="text-neutral-400 normal-case font-normal">(optional — enter now if you already have it)</span>
                         </label>
                       </div>
                       <input
